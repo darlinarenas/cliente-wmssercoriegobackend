@@ -1,0 +1,28 @@
+import { Router } from 'express';
+import bcrypt from 'bcryptjs';
+import { pool, makeUserId } from '../../db/database.js';
+import { requireRole } from '../../middleware/auth.js';
+
+export const usersRouter=Router();
+usersRouter.use(requireRole('ADMINISTRADOR'));
+const roles=new Set(['ADMINISTRADOR','ENCARGADO','OPERADOR_BODEGA','OPERADOR_RECEPCION']);
+function validate(body,creating=false){
+ const name=String(body.name||'').trim(),username=String(body.username||'').trim().toLowerCase(),role=String(body.role||'OPERADOR_BODEGA'),password=String(body.password||'');
+ if(!name)throw Object.assign(new Error('El nombre es obligatorio.'),{status:400});
+ if(!/^[a-z0-9._]{3,40}$/.test(username))throw Object.assign(new Error('El usuario debe tener 3 a 40 caracteres: letras, números, punto o guion bajo.'),{status:400});
+ if(!roles.has(role))throw Object.assign(new Error('Rol inválido.'),{status:400});
+ if(creating&&password.length<8)throw Object.assign(new Error('La contraseña temporal debe tener al menos 8 caracteres.'),{status:400});
+ return{name,username,role,password,active:body.active!==false};
+}
+usersRouter.get('/',async(_req,res,next)=>{try{const {rows}=await pool.query('SELECT id,name,username,role,active,must_change_password AS "mustChangePassword",created_at AS "createdAt" FROM users ORDER BY name');res.json(rows);}catch(e){next(e);}});
+usersRouter.post('/',async(req,res,next)=>{try{
+ const v=validate(req.body,true);let id=makeUserId(v.name),n=2;while((await pool.query('SELECT 1 FROM users WHERE id=$1',[id])).rowCount)id=`${makeUserId(v.name)}-${n++}`;
+ const hash=await bcrypt.hash(v.password,12);const {rows}=await pool.query(`INSERT INTO users(id,name,username,password_hash,role,active,must_change_password) VALUES($1,$2,$3,$4,$5,$6,true) RETURNING id,name,username,role,active,must_change_password AS "mustChangePassword",created_at AS "createdAt"`,[id,v.name,v.username,hash,v.role,v.active]);res.status(201).json(rows[0]);
+}catch(e){if(e.code==='23505')e=Object.assign(new Error('Ese nombre de usuario ya existe.'),{status:409});next(e);}});
+usersRouter.put('/:id',async(req,res,next)=>{try{
+ const v=validate(req.body,false);if(req.params.id==='USR-ADMIN'&&!v.active)return res.status(400).json({error:'No se puede desactivar el administrador principal.'});
+ let q='UPDATE users SET name=$1,username=$2,role=$3,active=$4,updated_at=now()',params=[v.name,v.username,v.role,v.active];
+ if(v.password){if(v.password.length<8)return res.status(400).json({error:'La contraseña debe tener al menos 8 caracteres.'});const hash=await bcrypt.hash(v.password,12);q+=`,password_hash=$5,must_change_password=true`;params.push(hash);}
+ q+=` WHERE id=$${params.length+1} RETURNING id,name,username,role,active,must_change_password AS "mustChangePassword",created_at AS "createdAt"`;params.push(req.params.id);
+ const {rows}=await pool.query(q,params);if(!rows[0])return res.status(404).json({error:'Usuario no encontrado.'});res.json(rows[0]);
+}catch(e){if(e.code==='23505')e=Object.assign(new Error('Ese nombre de usuario ya existe.'),{status:409});next(e);}});

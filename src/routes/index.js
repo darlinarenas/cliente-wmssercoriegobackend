@@ -1,0 +1,13 @@
+import { Router } from 'express';
+import { authRouter } from '../modules/auth/auth.routes.js';
+import { usersRouter } from '../modules/usuarios/users.routes.js';
+import { stateRouter } from '../modules/state/state.routes.js';
+import { entityRouter } from '../modules/catalogo/entity.routes.js';
+import { requireAuth } from '../middleware/auth.js';
+export const apiRouter=Router();
+apiRouter.get('/health',(_req,res)=>res.json({ok:true,service:'SercoRiego Lite WMS API',persistence:'postgresql'}));
+apiRouter.use('/auth',authRouter);
+apiRouter.use(requireAuth);
+apiRouter.use('/users',usersRouter);
+apiRouter.use('/state',stateRouter);
+apiRouter.use('/',entityRouter);
