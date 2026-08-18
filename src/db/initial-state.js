@@ -7276,6 +7276,8 @@ export const INITIAL_STATE = {
       "createdAt": "2026-08-16T21:36:53.921Z"
     }
   ],
+  "product_codes": [],
+  "orders": [],
   "inventory": [
     {
       "id": "INV-0001",

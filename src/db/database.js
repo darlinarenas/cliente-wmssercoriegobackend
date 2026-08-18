@@ -7,7 +7,7 @@ const { Pool } = pg;
 if(!env.databaseUrl) console.warn('[WMS] DATABASE_URL no configurada.');
 export const pool = new Pool({connectionString:env.databaseUrl,ssl:env.databaseSsl?{rejectUnauthorized:false}:false});
 
-const ENTITY_TABLES=['sites','sectors','racks','locations','products','inventory','pallets','receipts','transfers','movements','audit'];
+const ENTITY_TABLES=['sites','sectors','racks','locations','products','product_codes','inventory','pallets','receipts','transfers','orders','movements','audit'];
 
 const schemaSql=`
 CREATE TABLE IF NOT EXISTS wms_meta (
@@ -34,10 +34,12 @@ CREATE TABLE IF NOT EXISTS sectors (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS racks (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS locations (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS products (id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS product_codes (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS inventory (id TEXT PRIMARY KEY, product_code TEXT NOT NULL, location_id TEXT NOT NULL, qty NUMERIC NOT NULL DEFAULT 0, pallet_id TEXT, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS pallets (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS transfers (id TEXT PRIMARY KEY, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS movements (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS audit (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_products_code ON products(code);
@@ -45,6 +47,7 @@ CREATE INDEX IF NOT EXISTS idx_inventory_product ON inventory(product_code);
 CREATE INDEX IF NOT EXISTS idx_inventory_location ON inventory(location_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_pallet ON inventory(pallet_id);
 CREATE INDEX IF NOT EXISTS idx_users_active ON users(active);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS site_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
 `;
 
 function makeUserId(name){
@@ -91,7 +94,7 @@ export async function readState(client=pool,currentUser=null){
     else if(table==='inventory') result[table]=(await client.query('SELECT data FROM inventory ORDER BY id')).rows.map(r=>r.data);
     else result[table]=(await client.query(`SELECT data FROM ${table} ORDER BY id`)).rows.map(r=>r.data);
   }
-  result.users=(await client.query('SELECT id,name,username,role,active,created_at AS "createdAt" FROM users ORDER BY name')).rows;
+  result.users=(await client.query('SELECT id,name,username,role,active,site_ids AS "siteIds",created_at AS "createdAt" FROM users ORDER BY name')).rows;
   return result;
 }
 
@@ -100,8 +103,11 @@ export async function replaceState(client,state,expectedRevision,currentUser){
   const actual=Number(locked?.revision||1);
   if(expectedRevision!=null && Number(expectedRevision)!==actual){const e=new Error('El inventario cambió en otro equipo. Recarga antes de guardar.');e.status=409;e.code='REVISION_CONFLICT';throw e;}
   for(const table of ENTITY_TABLES){
+    // Compatibilidad durante despliegues: un frontend anterior que aún no conozca
+    // una colección nueva no puede vaciarla accidentalmente.
+    if(!Array.isArray(state[table])) continue;
     await client.query(`DELETE FROM ${table}`);
-    for(const item of state[table]||[]) await insertEntity(client,table,item);
+    for(const item of state[table]) await insertEntity(client,table,item);
   }
   const next=actual+1;
   await client.query('UPDATE wms_meta SET revision=$1,settings=$2::jsonb,planning=$3::jsonb,updated_at=now() WHERE id=1',[next,JSON.stringify(state.settings||{}),JSON.stringify(state.planning||{})]);
