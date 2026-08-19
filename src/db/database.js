@@ -87,15 +87,101 @@ export async function withTransaction(fn){
 }
 
 export async function readState(client=pool,currentUser=null){
-  const meta=(await client.query('SELECT * FROM wms_meta WHERE id=1')).rows[0];
-  const result={meta:{version:12,revision:Number(meta?.revision||1),updatedAt:meta?.updated_at,createdAt:meta?.created_at},settings:meta?.settings||{},planning:meta?.planning||{},session:{userId:currentUser?.id||'USR-ADMIN'}};
-  for(const table of ENTITY_TABLES){
-    if(table==='products') result[table]=(await client.query('SELECT data FROM products ORDER BY code')).rows.map(r=>r.data);
-    else if(table==='inventory') result[table]=(await client.query('SELECT data FROM inventory ORDER BY id')).rows.map(r=>r.data);
-    else result[table]=(await client.query(`SELECT data FROM ${table} ORDER BY id`)).rows.map(r=>r.data);
+  // Una sola ida a PostgreSQL para reconstruir el estado completo. Antes se
+  // realizaba una consulta por colección, acumulando latencia innecesaria.
+  const row=(await client.query(`
+    SELECT
+      m.revision,
+      m.settings,
+      m.planning,
+      m.created_at,
+      m.updated_at,
+      COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM sites),'[]'::jsonb) AS sites,
+      COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM sectors),'[]'::jsonb) AS sectors,
+      COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM racks),'[]'::jsonb) AS racks,
+      COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM locations),'[]'::jsonb) AS locations,
+      COALESCE((SELECT jsonb_agg(data ORDER BY code) FROM products),'[]'::jsonb) AS products,
+      COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM product_codes),'[]'::jsonb) AS product_codes,
+      COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM inventory),'[]'::jsonb) AS inventory,
+      COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM pallets),'[]'::jsonb) AS pallets,
+      COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM receipts),'[]'::jsonb) AS receipts,
+      COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM transfers),'[]'::jsonb) AS transfers,
+      COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM orders),'[]'::jsonb) AS orders,
+      COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM movements),'[]'::jsonb) AS movements,
+      COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM audit),'[]'::jsonb) AS audit,
+      COALESCE((
+        SELECT jsonb_agg(
+          jsonb_build_object(
+            'id',u.id,
+            'name',u.name,
+            'username',u.username,
+            'role',u.role,
+            'active',u.active,
+            'siteIds',u.site_ids,
+            'createdAt',u.created_at
+          ) ORDER BY u.name
+        ) FROM users u
+      ),'[]'::jsonb) AS users
+    FROM wms_meta m
+    WHERE m.id=1
+  `)).rows[0];
+
+  return {
+    meta:{version:12,revision:Number(row?.revision||1),updatedAt:row?.updated_at,createdAt:row?.created_at},
+    settings:row?.settings||{},
+    planning:row?.planning||{},
+    session:{userId:currentUser?.id||'USR-ADMIN'},
+    sites:row?.sites||[],
+    sectors:row?.sectors||[],
+    racks:row?.racks||[],
+    locations:row?.locations||[],
+    products:row?.products||[],
+    product_codes:row?.product_codes||[],
+    inventory:row?.inventory||[],
+    pallets:row?.pallets||[],
+    receipts:row?.receipts||[],
+    transfers:row?.transfers||[],
+    orders:row?.orders||[],
+    movements:row?.movements||[],
+    audit:row?.audit||[],
+    users:row?.users||[]
+  };
+}
+
+async function replaceTableBulk(client,table,items){
+  // Conserva exactamente la semántica anterior (reemplazo completo de la
+  // colección), pero inserta toda la colección en una sola consulta SQL.
+  await client.query(`DELETE FROM ${table}`);
+  if(!items.length)return;
+
+  const payload=JSON.stringify(items);
+  if(table==='products'){
+    await client.query(`
+      INSERT INTO products(id,code,data)
+      SELECT x->>'id',x->>'code',x
+      FROM jsonb_array_elements($1::jsonb) AS x
+    `,[payload]);
+    return;
   }
-  result.users=(await client.query('SELECT id,name,username,role,active,site_ids AS "siteIds",created_at AS "createdAt" FROM users ORDER BY name')).rows;
-  return result;
+  if(table==='inventory'){
+    await client.query(`
+      INSERT INTO inventory(id,product_code,location_id,qty,pallet_id,data)
+      SELECT
+        x->>'id',
+        x->>'productCode',
+        x->>'locationId',
+        COALESCE(NULLIF(x->>'qty',''),'0')::numeric,
+        NULLIF(x->>'palletId',''),
+        x
+      FROM jsonb_array_elements($1::jsonb) AS x
+    `,[payload]);
+    return;
+  }
+  await client.query(`
+    INSERT INTO ${table}(id,data)
+    SELECT x->>'id',x
+    FROM jsonb_array_elements($1::jsonb) AS x
+  `,[payload]);
 }
 
 export async function replaceState(client,state,expectedRevision,currentUser){
@@ -106,8 +192,7 @@ export async function replaceState(client,state,expectedRevision,currentUser){
     // Compatibilidad durante despliegues: un frontend anterior que aún no conozca
     // una colección nueva no puede vaciarla accidentalmente.
     if(!Array.isArray(state[table])) continue;
-    await client.query(`DELETE FROM ${table}`);
-    for(const item of state[table]) await insertEntity(client,table,item);
+    await replaceTableBulk(client,table,state[table]);
   }
   const next=actual+1;
   await client.query('UPDATE wms_meta SET revision=$1,settings=$2::jsonb,planning=$3::jsonb,updated_at=now() WHERE id=1',[next,JSON.stringify(state.settings||{}),JSON.stringify(state.planning||{})]);
