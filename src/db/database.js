@@ -67,10 +67,15 @@ export async function ensureDatabase(){
     await client.query('BEGIN');
     await client.query(schemaSql);
     await client.query("INSERT INTO wms_meta(id,revision,settings,planning) VALUES(1,1,$1::jsonb,$2::jsonb) ON CONFLICT(id) DO NOTHING",[JSON.stringify(INITIAL_STATE.settings||{}),JSON.stringify(INITIAL_STATE.planning||{})]);
-    const hash=await bcrypt.hash(env.adminPassword,12);
-    await client.query(`INSERT INTO users(id,name,username,password_hash,role,active,must_change_password)
-      VALUES('USR-ADMIN',$1,$2,$3,'ADMINISTRADOR',true,true)
-      ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, username=EXCLUDED.username, active=true`,[env.adminName,env.adminUsername.toLowerCase(),hash]);
+    // El administrador principal se crea una sola vez. Si ya existe, el arranque
+    // NO modifica username, nombre, contraseña, estado ni ningún otro dato.
+    const adminExists=(await client.query("SELECT 1 FROM users WHERE id='USR-ADMIN' LIMIT 1")).rowCount>0;
+    if(!adminExists){
+      const hash=await bcrypt.hash(env.adminPassword,12);
+      await client.query(`INSERT INTO users(id,name,username,password_hash,role,active,must_change_password)
+        VALUES('USR-ADMIN',$1,$2,$3,'ADMINISTRADOR',true,true)
+        ON CONFLICT(id) DO NOTHING`,[env.adminName,env.adminUsername.toLowerCase(),hash]);
+    }
     const count=(await client.query('SELECT count(*)::int AS n FROM products')).rows[0].n;
     if(count===0){
       for(const table of ENTITY_TABLES){
