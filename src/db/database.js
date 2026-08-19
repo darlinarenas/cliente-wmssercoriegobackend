@@ -130,7 +130,7 @@ export async function readState(client=pool,currentUser=null){
     meta:{version:12,revision:Number(row?.revision||1),updatedAt:row?.updated_at,createdAt:row?.created_at},
     settings:row?.settings||{},
     planning:row?.planning||{},
-    session:{userId:currentUser?.id||'USR-ADMIN'},
+    session:{userId:currentUser?.id||'USR-ADMIN',activeSiteId:(currentUser?.siteIds||currentUser?.site_ids||[])[0]||'REC'},
     sites:row?.sites||[],
     sectors:row?.sectors||[],
     racks:row?.racks||[],

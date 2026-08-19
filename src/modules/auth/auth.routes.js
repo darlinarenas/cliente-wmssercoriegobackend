@@ -8,7 +8,7 @@ import { requireAuth } from '../../middleware/auth.js';
 
 export const authRouter=Router();
 const loginLimiter=rateLimit({windowMs:15*60*1000,limit:30,standardHeaders:true,legacyHeaders:false,message:{error:'Demasiados intentos. Intenta nuevamente en unos minutos.'}});
-function publicUser(u){return{id:u.id,name:u.name,username:u.username,role:u.role,active:u.active,mustChangePassword:u.must_change_password??u.mustChangePassword};}
+function publicUser(u){return{id:u.id,name:u.name,username:u.username,role:u.role,active:u.active,siteIds:u.site_ids||u.siteIds||[],mustChangePassword:u.must_change_password??u.mustChangePassword};}
 
 authRouter.post('/login',loginLimiter,async(req,res,next)=>{try{
   const username=String(req.body?.username||'').trim().toLowerCase(), password=String(req.body?.password||'');
@@ -20,6 +20,17 @@ authRouter.post('/login',loginLimiter,async(req,res,next)=>{try{
 }catch(e){next(e);}});
 
 authRouter.get('/me',requireAuth,(req,res)=>res.json({user:req.user}));
+
+const supercodeLimiter=rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:true,legacyHeaders:false,message:{error:'Demasiados intentos de supercódigo. Intenta nuevamente en unos minutos.'}});
+authRouter.post('/verify-supercode',requireAuth,supercodeLimiter,async(req,res,next)=>{try{
+  if(req.user?.role!=='ADMINISTRADOR') return res.status(403).json({error:'Solo un administrador puede autorizar eliminaciones.'});
+  const supercode=String(req.body?.supercode||'');
+  if(!supercode) return res.status(400).json({error:'Ingresa el supercódigo administrativo.'});
+  const {rows}=await pool.query('SELECT password_hash FROM users WHERE id=$1',[req.user.id]);
+  const ok=rows[0]&&await bcrypt.compare(supercode,rows[0].password_hash);
+  if(!ok) return res.status(401).json({error:'Supercódigo incorrecto.'});
+  res.json({ok:true});
+}catch(e){next(e);}});
 authRouter.post('/change-password',requireAuth,async(req,res,next)=>{try{
  const current=String(req.body?.currentPassword||''),nextPassword=String(req.body?.newPassword||'');
  if(nextPassword.length<8)return res.status(400).json({error:'La nueva contraseña debe tener al menos 8 caracteres.'});
