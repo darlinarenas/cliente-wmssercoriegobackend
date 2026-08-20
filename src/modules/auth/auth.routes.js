@@ -12,10 +12,26 @@ const loginLimiter=rateLimit({windowMs:15*60*1000,limit:30,standardHeaders:true,
 function publicUser(u){return{id:u.id,name:u.name,username:u.username,role:u.role,active:u.active,siteIds:u.site_ids||u.siteIds||[],companyIds:u.company_ids||u.companyIds||[],mustChangePassword:u.must_change_password??u.mustChangePassword};}
 
 authRouter.post('/login',loginLimiter,async(req,res,next)=>{try{
-  const username=String(req.body?.username||'').trim().toLowerCase(), password=String(req.body?.password||'');
+  const username=String(req.body?.username||'').trim().toLowerCase();
+  const password=String(req.body?.password||'');
   if(!username||!password) return res.status(400).json({error:'Usuario y contraseña son obligatorios.'});
-  const {rows}=await pool.query('SELECT * FROM users WHERE lower(username)=$1',[username]);const u=rows[0];
-  if(!u||!u.active||!(await bcrypt.compare(password,u.password_hash))) return res.status(401).json({error:'Credenciales incorrectas.'});
+
+  // Fuente única de autenticación: tabla users de PostgreSQL.
+  // El rol, el estado y el hash salen del mismo registro; no se consulta
+  // ningún proveedor externo ni se usa una sesión previa para validar acceso.
+  const {rows}=await pool.query(`
+    SELECT id,name,username,password_hash,role,active,site_ids,company_ids,must_change_password
+    FROM users
+    WHERE lower(username)=$1
+    LIMIT 1
+  `,[username]);
+  const u=rows[0];
+  if(!u||u.active!==true||typeof u.password_hash!=='string')
+    return res.status(401).json({error:'Credenciales incorrectas.'});
+
+  const passwordOk=await bcrypt.compare(password,u.password_hash).catch(()=>false);
+  if(!passwordOk) return res.status(401).json({error:'Credenciales incorrectas.'});
+
   const token=jwt.sign({sub:u.id,role:u.role},env.jwtSecret,{expiresIn:env.jwtExpiresIn});
   res.json({token,user:publicUser(u)});
 }catch(e){next(e);}});
