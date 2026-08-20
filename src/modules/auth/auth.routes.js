@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
+import crypto from 'node:crypto';
 import { pool } from '../../db/database.js';
 import { env } from '../../config/env.js';
 import { requireAuth } from '../../middleware/auth.js';
@@ -20,6 +21,26 @@ authRouter.post('/login',loginLimiter,async(req,res,next)=>{try{
 }catch(e){next(e);}});
 
 authRouter.get('/me',requireAuth,(req,res)=>res.json({user:req.user}));
+
+const adminRecoveryLimiter=rateLimit({windowMs:15*60*1000,limit:5,standardHeaders:true,legacyHeaders:false,message:{error:'Demasiados intentos de recuperación. Intenta nuevamente en unos minutos.'}});
+function safeSecretEqual(a,b){
+ const aa=Buffer.from(String(a||''));const bb=Buffer.from(String(b||''));
+ return aa.length===bb.length&&aa.length>0&&crypto.timingSafeEqual(aa,bb);
+}
+authRouter.post('/recover-admin',adminRecoveryLimiter,async(req,res,next)=>{try{
+ const recoveryKey=String(req.body?.recoveryKey||'');
+ const newPassword=String(req.body?.newPassword||'');
+ if(!env.adminRecoveryKey||env.adminRecoveryKey.length<24)return res.status(503).json({error:'La recuperación administrativa no está configurada en el servidor.'});
+ if(!safeSecretEqual(recoveryKey,env.adminRecoveryKey))return res.status(401).json({error:'Clave de recuperación incorrecta.'});
+ if(newPassword.length<8)return res.status(400).json({error:'La nueva contraseña debe tener al menos 8 caracteres.'});
+ if(newPassword.length>128)return res.status(400).json({error:'La nueva contraseña es demasiado larga.'});
+ const target=(await pool.query("SELECT id FROM users WHERE id='USR-ADMIN' LIMIT 1")).rows[0];
+ if(!target)return res.status(404).json({error:'No existe el administrador principal.'});
+ const hash=await bcrypt.hash(newPassword,12);
+ await pool.query('UPDATE users SET password_hash=$1,active=true,must_change_password=false,updated_at=now() WHERE id=$2',[hash,target.id]);
+ res.json({ok:true});
+}catch(e){next(e);}});
+
 
 const supercodeLimiter=rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:true,legacyHeaders:false,message:{error:'Demasiados intentos de supercódigo. Intenta nuevamente en unos minutos.'}});
 authRouter.post('/verify-supercode',requireAuth,supercodeLimiter,async(req,res,next)=>{try{

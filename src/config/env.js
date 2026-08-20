@@ -12,5 +12,6 @@ export const env = {
   adminUsername: process.env.ADMIN_USERNAME || 'admin',
   adminPassword: process.env.ADMIN_PASSWORD || 'SercoRiego2026!',
   adminName: process.env.ADMIN_NAME || 'Administrador',
+  adminRecoveryKey: process.env.ADMIN_RECOVERY_KEY || '',
   kameIntegrationKey: process.env.KAME_INTEGRATION_KEY || '',
 };
