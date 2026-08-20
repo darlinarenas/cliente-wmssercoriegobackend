@@ -8,7 +8,7 @@ import { requireAuth } from '../../middleware/auth.js';
 
 export const authRouter=Router();
 const loginLimiter=rateLimit({windowMs:15*60*1000,limit:30,standardHeaders:true,legacyHeaders:false,message:{error:'Demasiados intentos. Intenta nuevamente en unos minutos.'}});
-function publicUser(u){return{id:u.id,name:u.name,username:u.username,role:u.role,active:u.active,siteIds:u.site_ids||u.siteIds||[],mustChangePassword:u.must_change_password??u.mustChangePassword};}
+function publicUser(u){return{id:u.id,name:u.name,username:u.username,role:u.role,active:u.active,siteIds:u.site_ids||u.siteIds||[],companyIds:u.company_ids||u.companyIds||[],mustChangePassword:u.must_change_password??u.mustChangePassword};}
 
 authRouter.post('/login',loginLimiter,async(req,res,next)=>{try{
   const username=String(req.body?.username||'').trim().toLowerCase(), password=String(req.body?.password||'');

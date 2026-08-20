@@ -8,11 +8,14 @@ export const INITIAL_STATE = {
     "locationCodeFormat": "{SEDE}-{RACK}-M{MODULO}-N{NIVEL}"
   },
   "session": {
-    "userId": "USR-ADMIN"
+    "userId": "USR-ADMIN",
+    "activeCompanyId": "SERCO_RIEGO"
   },
+  "companies": [{"id":"SERCO_RIEGO","name":"Serco Riego","code":"SERCO_RIEGO","active":true,"notes":"Empresa principal"}],
   "sites": [
     {
       "id": "REC",
+      "companyId": "SERCO_RIEGO",
       "name": "Bodega Recoleta",
       "type": "BODEGA",
       "active": true,
@@ -21,6 +24,7 @@ export const INITIAL_STATE = {
     },
     {
       "id": "TIENDA",
+      "companyId": "SERCO_RIEGO",
       "name": "Bodega Tienda de Ventas",
       "type": "BODEGA_TIENDA",
       "active": false,
