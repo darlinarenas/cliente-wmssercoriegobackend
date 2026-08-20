@@ -30,8 +30,9 @@ function safeSecretEqual(a,b){
 authRouter.post('/recover-admin',adminRecoveryLimiter,async(req,res,next)=>{try{
  const recoveryKey=String(req.body?.recoveryKey||'');
  const newPassword=String(req.body?.newPassword||'');
- if(!env.adminRecoveryKey||env.adminRecoveryKey.length<24)return res.status(503).json({error:'La recuperación administrativa no está configurada en el servidor.'});
- if(!safeSecretEqual(recoveryKey,env.adminRecoveryKey))return res.status(401).json({error:'Clave de recuperación incorrecta.'});
+ const configuredRecoveryKey=String(process.env.ADMIN_RECOVERY_KEY||'');
+ if(!configuredRecoveryKey)return res.status(503).json({error:'La recuperación administrativa no está configurada en el servidor.'});
+ if(!safeSecretEqual(recoveryKey,configuredRecoveryKey))return res.status(401).json({error:'Clave de recuperación incorrecta.'});
  if(newPassword.length<8)return res.status(400).json({error:'La nueva contraseña debe tener al menos 8 caracteres.'});
  if(newPassword.length>128)return res.status(400).json({error:'La nueva contraseña es demasiado larga.'});
  const target=(await pool.query("SELECT id FROM users WHERE id='USR-ADMIN' LIMIT 1")).rows[0];
