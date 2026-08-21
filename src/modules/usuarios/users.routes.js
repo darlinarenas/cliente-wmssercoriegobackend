@@ -2,7 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { pool, makeUserId } from '../../db/database.js';
 import { requireRole } from '../../middleware/auth.js';
-import { hashPassword, verifyPassword } from '../../security/passwords.js';
+import { storePassword, verifyPassword } from '../../security/passwords.js';
 
 export const usersRouter=Router();
 usersRouter.use(requireRole('ADMINISTRADOR'));
@@ -25,7 +25,7 @@ usersRouter.get('/',async(_req,res,next)=>{try{const {rows}=await pool.query(`SE
 
 usersRouter.post('/',async(req,res,next)=>{try{
  const v=validate(req.body,true);let id=makeUserId(v.name),n=2;while((await pool.query('SELECT 1 FROM users WHERE id=$1',[id])).rowCount)id=`${makeUserId(v.name)}-${n++}`;
- const hash=await hashPassword(v.password);const {rows}=await pool.query(`INSERT INTO users(id,name,username,password_hash,role,active,site_ids,company_ids,must_change_password) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,false) RETURNING ${publicUserSql()}`,[id,v.name,v.username,hash,v.role,v.active,JSON.stringify(v.siteIds),JSON.stringify(v.companyIds)]);res.status(201).json(rows[0]);
+ const storedPassword=storePassword(v.password);const {rows}=await pool.query(`INSERT INTO users(id,name,username,password_hash,role,active,site_ids,company_ids,must_change_password) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,false) RETURNING ${publicUserSql()}`,[id,v.name,v.username,storedPassword,v.role,v.active,JSON.stringify(v.siteIds),JSON.stringify(v.companyIds)]);res.status(201).json(rows[0]);
 }catch(e){if(e.code==='23505')e=Object.assign(new Error('Ese nombre de usuario ya existe.'),{status:409});next(e);}});
 
 usersRouter.put('/:id',async(req,res,next)=>{try{
@@ -41,10 +41,10 @@ usersRouter.post('/:id/reset-password',passwordResetLimiter,async(req,res,next)=
  if(newPassword.length>128)return res.status(400).json({error:'La nueva contraseña es demasiado larga.'});
  if(!adminPassword)return res.status(400).json({error:'Ingresa tu contraseña administrativa para autorizar el cambio.'});
  const admin=(await pool.query('SELECT password_hash FROM users WHERE id=$1',[req.user.id])).rows[0];
- if(!admin||!(await verifyPassword(adminPassword,admin.password_hash)))return res.status(401).json({error:'La contraseña administrativa no coincide.'});
+ if(!admin||!verifyPassword(adminPassword,admin.password_hash))return res.status(401).json({error:'La contraseña administrativa no coincide.'});
  const target=(await pool.query('SELECT id,name,username FROM users WHERE id=$1',[req.params.id])).rows[0];
  if(!target)return res.status(404).json({error:'Usuario no encontrado.'});
- const hash=await hashPassword(newPassword);
- await pool.query('UPDATE users SET password_hash=$1,must_change_password=false,active=true,updated_at=now() WHERE id=$2',[hash,target.id]);
+ const storedPassword=storePassword(newPassword);
+ await pool.query('UPDATE users SET password_hash=$1,must_change_password=false,active=true,updated_at=now() WHERE id=$2',[storedPassword,target.id]);
  res.json({ok:true,user:{id:target.id,name:target.name,username:target.username}});
 }catch(e){next(e);}});

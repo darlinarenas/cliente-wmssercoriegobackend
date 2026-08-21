@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { hashPassword } from '../src/security/passwords.js';
+import { storePassword } from '../src/security/passwords.js';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -42,7 +42,7 @@ try {
       console.error(`ERROR: El usuario "${username}" existe pero su rol es ${user.role}. No se modificó nada.`);
       process.exitCode = 3;
     } else {
-      const hash = await hashPassword(password);
+      const storedPassword = storePassword(password);
       await pool.query(
         `UPDATE users
          SET password_hash=$1,
@@ -50,7 +50,7 @@ try {
              must_change_password=false,
              updated_at=now()
          WHERE id=$2`,
-        [hash, user.id]
+        [storedPassword, user.id]
       );
       console.log('OK: contraseña administrativa actualizada correctamente.');
       console.log(`Usuario: ${user.username}`);

@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { pool } from '../../db/database.js';
 import { env } from '../../config/env.js';
 import { requireAuth } from '../../middleware/auth.js';
-import { hashPassword, verifyPassword } from '../../security/passwords.js';
+import { storePassword, verifyPassword } from '../../security/passwords.js';
 
 export const authRouter=Router();
 const loginLimiter=rateLimit({windowMs:15*60*1000,limit:30,standardHeaders:true,legacyHeaders:false,message:{error:'Demasiados intentos. Intenta nuevamente en unos minutos.'}});
@@ -17,7 +17,7 @@ authRouter.post('/login',loginLimiter,async(req,res,next)=>{try{
   if(!username||!password) return res.status(400).json({error:'Usuario y contraseña son obligatorios.'});
 
   // Fuente única de autenticación: tabla users de PostgreSQL.
-  // El rol, el estado y el hash salen del mismo registro; no se consulta
+  // El rol, el estado y la contraseña salen del mismo registro; no se consulta
   // ningún proveedor externo ni se usa una sesión previa para validar acceso.
   const {rows}=await pool.query(`
     SELECT id,name,username,password_hash,role,active,site_ids,company_ids,must_change_password
@@ -29,7 +29,7 @@ authRouter.post('/login',loginLimiter,async(req,res,next)=>{try{
   if(!u||u.active!==true||typeof u.password_hash!=='string')
     return res.status(401).json({error:'Credenciales incorrectas.'});
 
-  const passwordOk=await verifyPassword(password,u.password_hash);
+  const passwordOk=verifyPassword(password,u.password_hash);
   if(!passwordOk) return res.status(401).json({error:'Credenciales incorrectas.'});
 
   const token=jwt.sign({sub:u.id,role:u.role},env.jwtSecret,{expiresIn:env.jwtExpiresIn});
@@ -53,8 +53,8 @@ authRouter.post('/recover-admin',adminRecoveryLimiter,async(req,res,next)=>{try{
  if(newPassword.length>128)return res.status(400).json({error:'La nueva contraseña es demasiado larga.'});
  const target=(await pool.query("SELECT id FROM users WHERE id='USR-ADMIN' LIMIT 1")).rows[0];
  if(!target)return res.status(404).json({error:'No existe el administrador principal.'});
- const hash=await hashPassword(newPassword);
- await pool.query('UPDATE users SET password_hash=$1,active=true,must_change_password=false,updated_at=now() WHERE id=$2',[hash,target.id]);
+ const storedPassword=storePassword(newPassword);
+ await pool.query('UPDATE users SET password_hash=$1,active=true,must_change_password=false,updated_at=now() WHERE id=$2',[storedPassword,target.id]);
  res.json({ok:true});
 }catch(e){next(e);}});
 
@@ -65,7 +65,7 @@ authRouter.post('/verify-supercode',requireAuth,supercodeLimiter,async(req,res,n
   const supercode=String(req.body?.supercode||'');
   if(!supercode) return res.status(400).json({error:'Ingresa el supercódigo administrativo.'});
   const {rows}=await pool.query('SELECT password_hash FROM users WHERE id=$1',[req.user.id]);
-  const ok=rows[0]&&await verifyPassword(supercode,rows[0].password_hash);
+  const ok=rows[0]&&verifyPassword(supercode,rows[0].password_hash);
   if(!ok) return res.status(401).json({error:'Supercódigo incorrecto.'});
   res.json({ok:true});
 }catch(e){next(e);}});
@@ -73,7 +73,7 @@ authRouter.post('/change-password',requireAuth,async(req,res,next)=>{try{
  const current=String(req.body?.currentPassword||''),nextPassword=String(req.body?.newPassword||'');
  if(nextPassword.length<8)return res.status(400).json({error:'La nueva contraseña debe tener al menos 8 caracteres.'});
  const {rows}=await pool.query('SELECT password_hash FROM users WHERE id=$1',[req.user.id]);
- if(!(await verifyPassword(current,rows[0].password_hash))) return res.status(400).json({error:'La contraseña actual no coincide.'});
- const hash=await hashPassword(nextPassword);await pool.query('UPDATE users SET password_hash=$1,must_change_password=false,updated_at=now() WHERE id=$2',[hash,req.user.id]);
+ if(!verifyPassword(current,rows[0].password_hash)) return res.status(400).json({error:'La contraseña actual no coincide.'});
+ const storedPassword=storePassword(nextPassword);await pool.query('UPDATE users SET password_hash=$1,must_change_password=false,updated_at=now() WHERE id=$2',[storedPassword,req.user.id]);
  res.json({ok:true});
 }catch(e){next(e);}});

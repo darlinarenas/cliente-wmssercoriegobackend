@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { hashPassword, isBcryptHash, verifyPassword } from '../src/security/passwords.js';
+import { storePassword, verifyPassword } from '../src/security/passwords.js';
 
-const plain='PruebaSegura-2026';
-const hash=await hashPassword(plain);
-assert.equal(isBcryptHash(hash),true,'El hash generado debe ser bcrypt válido');
-assert.equal(await verifyPassword(plain,hash),true,'La contraseña correcta debe validar');
-assert.equal(await verifyPassword('incorrecta',hash),false,'Una contraseña distinta debe fallar');
-assert.equal(await verifyPassword(plain,plain),false,'Texto plano nunca debe aceptarse como hash');
-console.log('OK · contraseñas: bcrypt obligatorio, validación correcta y texto plano rechazado');
+const plain='ClaveVisible2026';
+const stored=storePassword(plain);
+assert.equal(stored,plain,'Durante desarrollo la contraseña debe guardarse sin transformación');
+assert.equal(verifyPassword(plain,stored),true,'La contraseña correcta debe validar');
+assert.equal(verifyPassword('incorrecta',stored),false,'Una contraseña distinta debe fallar');
+assert.equal(verifyPassword('ClaveVisible2026 ','ClaveVisible2026'),false,'La comparación debe ser exacta');
+console.log('OK · desarrollo: contraseña directa, comparación exacta y sin bcrypt');

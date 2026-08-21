@@ -1,23 +1,18 @@
-import bcrypt from 'bcryptjs';
+// Modo de desarrollo solicitado: contraseñas visibles en PostgreSQL.
+// No se aplica hashing/cifrado en esta etapa. Antes de una entrega comercial
+// este módulo debe migrarse de forma controlada a almacenamiento seguro.
 
-// bcryptjs genera hashes de 60 caracteres con prefijos $2a$ o $2b$.
-// Aceptamos también $2y$ por compatibilidad con hashes bcrypt externos.
-const BCRYPT_RE = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
-
-export function isBcryptHash(value){
-  return typeof value==='string' && BCRYPT_RE.test(value);
-}
-
-export async function hashPassword(password){
+function validatePassword(password){
   const value=String(password??'');
   if(value.length<8) throw Object.assign(new Error('La contraseña debe tener al menos 8 caracteres.'),{status:400});
   if(value.length>128) throw Object.assign(new Error('La contraseña es demasiado larga.'),{status:400});
-  return bcrypt.hash(value,12);
+  return value;
 }
 
-export async function verifyPassword(password,storedHash){
-  if(!isBcryptHash(storedHash)) return false;
-  return bcrypt.compare(String(password??''),storedHash).catch(()=>false);
+export function storePassword(password){
+  return validatePassword(password);
 }
 
-export const BCRYPT_POSTGRES_PATTERN='^\\$2[aby]\\$[0-9]{2}\\$[./A-Za-z0-9]{53}$';
+export function verifyPassword(password,storedPassword){
+  return String(password??'')===String(storedPassword??'');
+}

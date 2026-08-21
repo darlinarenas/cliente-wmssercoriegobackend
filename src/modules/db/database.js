@@ -1,6 +1,4 @@
 import pg from 'pg';
-import bcrypt from 'bcryptjs';
-import { isBcryptHash, BCRYPT_POSTGRES_PATTERN } from '../security/passwords.js';
 import { env } from '../config/env.js';
 import { INITIAL_STATE } from './initial-state.js';
 
@@ -69,37 +67,17 @@ export async function ensureDatabase(){
   try{
     await client.query('BEGIN');
     await client.query(schemaSql);
+    // Desarrollo: no exigir formato bcrypt en password_hash. Si una versión
+    // anterior creó esta restricción, se elimina de forma idempotente.
+    await client.query('ALTER TABLE users DROP CONSTRAINT IF EXISTS users_password_hash_bcrypt_chk');
     await client.query("INSERT INTO wms_meta(id,revision,settings,planning) VALUES(1,1,$1::jsonb,$2::jsonb) ON CONFLICT(id) DO NOTHING",[JSON.stringify(INITIAL_STATE.settings||{}),JSON.stringify(INITIAL_STATE.planning||{})]);
     // El administrador principal se crea una sola vez. Si ya existe, el arranque
-    // NO cambia sus credenciales válidas. Solo sanea hashes legacy/inseguros.
+    // NO modifica username, nombre, contraseña, estado ni ningún otro dato.
     const adminExists=(await client.query("SELECT 1 FROM users WHERE id='USR-ADMIN' LIMIT 1")).rowCount>0;
     if(!adminExists){
-      const hash=await bcrypt.hash(env.adminPassword,12);
       await client.query(`INSERT INTO users(id,name,username,password_hash,role,active,must_change_password)
-        VALUES('USR-ADMIN',$1,$2,$3,'ADMINISTRADOR',true,true)
-        ON CONFLICT(id) DO NOTHING`,[env.adminName,env.adminUsername.toLowerCase(),hash]);
-    }
-
-    // Migración defensiva: versiones antiguas o ediciones manuales pudieron dejar
-    // una contraseña en texto plano dentro de password_hash. Se convierte una sola
-    // vez a bcrypt conservando exactamente la misma contraseña que tenía el usuario.
-    const legacyUsers=(await client.query('SELECT id,password_hash FROM users')).rows.filter(u=>!isBcryptHash(u.password_hash));
-    for(const user of legacyUsers){
-      const legacy=String(user.password_hash||'');
-      if(legacy.length<8||legacy.length>128){
-        throw new Error(`El usuario ${user.id} tiene un password_hash inválido y no puede migrarse automáticamente.`);
-      }
-      const secureHash=await bcrypt.hash(legacy,12);
-      await client.query('UPDATE users SET password_hash=$1,updated_at=now() WHERE id=$2',[secureHash,user.id]);
-      console.warn(`[WMS] Credencial legacy de ${user.id} migrada automáticamente a bcrypt.`);
-    }
-
-    // Barrera permanente: después de sanear los registros existentes, PostgreSQL
-    // impide que vuelva a guardarse texto plano por accidente en password_hash.
-    const constraintName='users_password_hash_bcrypt_chk';
-    const constraintExists=(await client.query('SELECT 1 FROM pg_constraint WHERE conname=$1 LIMIT 1',[constraintName])).rowCount>0;
-    if(!constraintExists){
-      await client.query(`ALTER TABLE users ADD CONSTRAINT ${constraintName} CHECK (password_hash ~ '${BCRYPT_POSTGRES_PATTERN}')`);
+        VALUES('USR-ADMIN',$1,$2,$3,'ADMINISTRADOR',true,false)
+        ON CONFLICT(id) DO NOTHING`,[env.adminName,env.adminUsername.toLowerCase(),env.adminPassword]);
     }
     const count=(await client.query('SELECT count(*)::int AS n FROM products')).rows[0].n;
     if(count===0){
