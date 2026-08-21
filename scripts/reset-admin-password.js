@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import bcrypt from 'bcryptjs';
+import { hashPassword } from '../src/security/passwords.js';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -42,7 +42,7 @@ try {
       console.error(`ERROR: El usuario "${username}" existe pero su rol es ${user.role}. No se modificó nada.`);
       process.exitCode = 3;
     } else {
-      const hash = await bcrypt.hash(password, 12);
+      const hash = await hashPassword(password);
       await pool.query(
         `UPDATE users
          SET password_hash=$1,
