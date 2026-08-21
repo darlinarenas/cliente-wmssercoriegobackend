@@ -47,7 +47,7 @@ app.use(cors({
   },
   credentials:false,
   methods:['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
-  allowedHeaders:['Content-Type','Authorization','X-Kame-Integration-Key'],
+  allowedHeaders:['Content-Type','Authorization','X-Kame-Integration-Key','X-WMS-Site'],
   optionsSuccessStatus:204,
 }));
 
