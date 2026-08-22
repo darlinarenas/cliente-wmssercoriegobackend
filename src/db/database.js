@@ -1,7 +1,7 @@
 import pg from 'pg';
-import bcrypt from 'bcryptjs';
 import { env } from '../config/env.js';
 import { INITIAL_STATE } from './initial-state.js';
+import { storePassword } from '../security/passwords.js';
 
 const { Pool } = pg;
 if(!env.databaseUrl) console.warn('[WMS] DATABASE_URL no configurada.');
@@ -73,7 +73,10 @@ export async function ensureDatabase(){
     // NO modifica username, nombre, contraseña, estado ni ningún otro dato.
     const adminExists=(await client.query("SELECT 1 FROM users WHERE id='USR-ADMIN' LIMIT 1")).rowCount>0;
     if(!adminExists){
-      const hash=await bcrypt.hash(env.adminPassword,12);
+      // Mantiene el mismo modo de contraseña configurado para el resto de la
+      // aplicación. Evita crear una base nueva con una clave incompatible con
+      // el inicio de sesión actual de desarrollo.
+      const hash=storePassword(env.adminPassword);
       await client.query(`INSERT INTO users(id,name,username,password_hash,role,active,must_change_password)
         VALUES('USR-ADMIN',$1,$2,$3,'ADMINISTRADOR',true,true)
         ON CONFLICT(id) DO NOTHING`,[env.adminName,env.adminUsername.toLowerCase(),hash]);

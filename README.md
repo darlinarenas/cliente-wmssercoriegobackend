@@ -2,9 +2,14 @@
 
 Backend Node/Express preparado para PostgreSQL. Conserva la lógica y datos de la versión congelada y añade autenticación real, usuarios administrables, persistencia PostgreSQL y control de concurrencia por revisión.
 
+En esta etapa de desarrollo las contraseñas se almacenan temporalmente sin
+transformación, de acuerdo con la configuración actual del proyecto. Antes de
+producción comercial deben migrarse a hash seguro.
+
 ## 1. Configuración
 
-1. Copia `.env.example` a `.env`.
+1. Copia `.env.example` a `.env` solo en el equipo local. En Render configura
+   las mismas claves como variables de entorno.
 2. Coloca tu `DATABASE_URL` de PostgreSQL.
 3. Cambia `JWT_SECRET` por una clave larga y aleatoria.
 4. Define `FRONTEND_ORIGIN` con la URL real del frontend. Se pueden separar varios orígenes por coma.
@@ -13,6 +18,8 @@ Backend Node/Express preparado para PostgreSQL. Conserva la lógica y datos de l
 7. Ejecuta `npm start`.
 
 El servidor también ejecuta la inicialización de esquema al arrancar, por lo que `db:init` es recomendable pero no obligatorio.
+
+No subas ni compartas el archivo `.env`.
 
 ## Credenciales iniciales
 
