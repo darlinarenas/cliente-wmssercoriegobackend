@@ -10,7 +10,8 @@
     "check": "node --check src/server.js && node --check src/app.js && node --check src/routes/index.js && node --check src/db/database.js && node --check src/security/passwords.js && node --check src/modules/auth/auth.routes.js && node --check src/modules/usuarios/users.routes.js && node --check src/modules/state/state.routes.js",
     "test:logic": "node test/logic.test.js",
     "admin:reset": "node scripts/reset-admin-password.js",
-    "test:passwords": "node test/password-security.test.js"
+    "test:passwords": "node test/password-security.test.js",
+    "import:real": "node scripts/import-real-inventory.js --apply"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
