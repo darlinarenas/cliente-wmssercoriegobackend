@@ -1,5 +1,10 @@
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { app } from './app.js';
 import { env } from './config/env.js';
 import { ensureDatabase } from './db/database.js';
 await ensureDatabase();
+const importScript=fileURLToPath(new URL('../scripts/import-real-inventory.js',import.meta.url));
+const realImport=spawnSync(process.execPath,[importScript,'--apply','--once'],{stdio:'inherit',env:process.env});
+if(realImport.status!==0)throw new Error(`Falló la importación única de inventario real (código ${realImport.status}).`);
 app.listen(env.port,()=>console.log(`SercoRiego WMS API escuchando en puerto ${env.port}`));

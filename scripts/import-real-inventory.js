@@ -4,6 +4,8 @@ import { fileURLToPath } from 'url';
 import { pool } from '../src/db/database.js';
 
 const APPLY=process.argv.includes('--apply');
+const ONCE=process.argv.includes('--once');
+const IMPORT_KEY='realInventory20260821';
 if(!APPLY){
   console.error('Importación protegida. Ejecuta con --apply para cargar los datos reales.');
   process.exit(2);
@@ -13,9 +15,21 @@ const here=path.dirname(fileURLToPath(import.meta.url));
 const file=path.join(here,'..','data','real-inventory-2026-08-21.json');
 const data=JSON.parse(fs.readFileSync(file,'utf8'));
 const client=await pool.connect();
+let skipImport=false;
 try{
   await client.query('BEGIN');
 
+  if(ONCE){
+    const metaLock=(await client.query('SELECT settings FROM wms_meta WHERE id=1 FOR UPDATE')).rows[0];
+    const previous=metaLock?.settings?.imports?.[IMPORT_KEY];
+    if(previous?.completed){
+      await client.query('COMMIT');
+      console.log(JSON.stringify({ok:true,skipped:true,reason:'Importación real ya ejecutada',importKey:IMPORT_KEY,completedAt:previous.completedAt||null},null,2));
+      skipImport=true;
+    }
+  }
+
+  if(!skipImport){
   const site=data.siteToEnsure;
   await client.query('INSERT INTO sites(id,data) VALUES($1,$2::jsonb) ON CONFLICT(id) DO UPDATE SET data=EXCLUDED.data',[site.id,JSON.stringify(site)]);
 
@@ -63,10 +77,21 @@ try{
   const settings=meta?.settings||{};
   settings.erpStockBySite={...(settings.erpStockBySite||{}),...data.erpStockBySite};
   settings.erpStockUpdatedAt={...(settings.erpStockUpdatedAt||{}),REC:data.generatedAt,VIT:data.generatedAt};
+  if(ONCE){
+    settings.imports={...(settings.imports||{}),[IMPORT_KEY]:{
+      completed:true,
+      completedAt:new Date().toISOString(),
+      products:data.products.length,
+      aliases:data.product_codes.length,
+      inventoryRows:data.inventory.length,
+      pallets:data.pallets.length
+    }};
+  }
   await client.query('UPDATE wms_meta SET settings=$1::jsonb,revision=revision+1,updated_at=now() WHERE id=1',[JSON.stringify(settings)]);
 
   await client.query('COMMIT');
   console.log(JSON.stringify({ok:true,products:data.products.length,aliases:data.product_codes.length,inventoryRows:data.inventory.length,pallets:data.pallets.length,kameRecoleta:Object.keys(data.erpStockBySite.REC||{}).length,kameVitacura:Object.keys(data.erpStockBySite.VIT||{}).length},null,2));
+  }
 }catch(err){
   await client.query('ROLLBACK');
   console.error(err);
