@@ -47,7 +47,9 @@ app.use(cors({
   },
   credentials:false,
   methods:['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
-  allowedHeaders:['Content-Type','Authorization','X-Kame-Integration-Key','X-WMS-Site'],
+  // X-WMS-Compact lo envía el frontend al guardar el estado. Si no se declara
+  // aquí, el navegador bloquea el PUT en el preflight y muestra "Failed to fetch".
+  allowedHeaders:['Content-Type','Authorization','X-Kame-Integration-Key','X-WMS-Site','X-WMS-Compact'],
   optionsSuccessStatus:204,
 }));
 
