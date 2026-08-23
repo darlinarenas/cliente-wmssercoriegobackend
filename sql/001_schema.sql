@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('ADMIN_GLOBAL','ADMINISTRADOR','ENCARGADO','OPERADOR_BODEGA','OPERADOR_RECEPCION')),
   active BOOLEAN NOT NULL DEFAULT true,
+  access_status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (access_status IN ('ACTIVE','PAUSED','DISABLED')),
+  access_assignments JSONB NOT NULL DEFAULT '[]'::jsonb,
   must_change_password BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -37,3 +39,6 @@ CREATE INDEX IF NOT EXISTS idx_inventory_pallet ON inventory(pallet_id);
 CREATE INDEX IF NOT EXISTS idx_users_active ON users(active);
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS site_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS company_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS access_status TEXT NOT NULL DEFAULT 'ACTIVE';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS access_assignments JSONB NOT NULL DEFAULT '[]'::jsonb;

@@ -50,6 +50,10 @@ CREATE INDEX IF NOT EXISTS idx_inventory_pallet ON inventory(pallet_id);
 CREATE INDEX IF NOT EXISTS idx_users_active ON users(active);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS site_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS company_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS access_status TEXT NOT NULL DEFAULT 'ACTIVE';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS access_assignments JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_access_status_check;
+ALTER TABLE users ADD CONSTRAINT users_access_status_check CHECK (access_status IN ('ACTIVE','PAUSED','DISABLED'));
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('ADMIN_GLOBAL','ADMINISTRADOR','ENCARGADO','OPERADOR_BODEGA','OPERADOR_RECEPCION'));
 `;
@@ -130,6 +134,8 @@ export async function readState(client=pool,currentUser=null){
             'username',u.username,
             'role',u.role,
             'active',u.active,
+            'accessStatus',u.access_status,
+            'accessAssignments',u.access_assignments,
             'siteIds',u.site_ids,
             'companyIds',u.company_ids,
             'createdAt',u.created_at

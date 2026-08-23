@@ -2,14 +2,14 @@ import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import crypto from 'node:crypto';
-import { pool } from '../../db/database.js';
+import { pool, readState } from '../../db/database.js';
 import { env } from '../../config/env.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { storePassword, verifyPassword } from '../../security/passwords.js';
 
 export const authRouter=Router();
 const loginLimiter=rateLimit({windowMs:15*60*1000,limit:30,standardHeaders:true,legacyHeaders:false,message:{error:'Demasiados intentos. Intenta nuevamente en unos minutos.'}});
-function publicUser(u){return{id:u.id,name:u.name,username:u.username,role:u.role,active:u.active,siteIds:u.site_ids||u.siteIds||[],companyIds:u.company_ids||u.companyIds||[],mustChangePassword:u.must_change_password??u.mustChangePassword};}
+function publicUser(u){return{id:u.id,name:u.name,username:u.username,role:u.role,active:u.active,accessStatus:u.access_status||u.accessStatus||'ACTIVE',accessAssignments:u.access_assignments||u.accessAssignments||[],siteIds:u.site_ids||u.siteIds||[],companyIds:u.company_ids||u.companyIds||[],mustChangePassword:u.must_change_password??u.mustChangePassword};}
 
 authRouter.post('/login',loginLimiter,async(req,res,next)=>{try{
   const username=String(req.body?.username||'').trim().toLowerCase();
@@ -20,20 +20,22 @@ authRouter.post('/login',loginLimiter,async(req,res,next)=>{try{
   // El rol, el estado y la contraseña salen del mismo registro; no se consulta
   // ningún proveedor externo ni se usa una sesión previa para validar acceso.
   const {rows}=await pool.query(`
-    SELECT id,name,username,password_hash,role,active,site_ids,company_ids,must_change_password
+    SELECT id,name,username,password_hash,role,active,access_status,access_assignments,site_ids,company_ids,must_change_password
     FROM users
     WHERE lower(username)=$1
     LIMIT 1
   `,[username]);
   const u=rows[0];
-  if(!u||u.active!==true||typeof u.password_hash!=='string')
+  if(!u||u.active!==true||u.access_status!=='ACTIVE'||typeof u.password_hash!=='string')
     return res.status(401).json({error:'Credenciales incorrectas.'});
 
   const passwordOk=verifyPassword(password,u.password_hash);
   if(!passwordOk) return res.status(401).json({error:'Credenciales incorrectas.'});
 
   const token=jwt.sign({sub:u.id,role:u.role},env.jwtSecret,{expiresIn:env.jwtExpiresIn});
-  res.json({token,user:publicUser(u)});
+  const user=publicUser(u);
+  const state=await readState(undefined,user);
+  res.json({token,user,state});
 }catch(e){next(e);}});
 
 authRouter.get('/me',requireAuth,(req,res)=>res.json({user:req.user}));
