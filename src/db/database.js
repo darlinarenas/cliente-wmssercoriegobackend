@@ -50,6 +50,8 @@ CREATE INDEX IF NOT EXISTS idx_inventory_pallet ON inventory(pallet_id);
 CREATE INDEX IF NOT EXISTS idx_users_active ON users(active);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS site_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS company_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('ADMIN_GLOBAL','ADMINISTRADOR','ENCARGADO','OPERADOR_BODEGA','OPERADOR_RECEPCION'));
 `;
 
 function makeUserId(name){
@@ -197,7 +199,7 @@ async function replaceTableBulk(client,table,items){
   `,[payload]);
 }
 
-export async function replaceState(client,state,expectedRevision,currentUser){
+export async function replaceState(client,state,expectedRevision,currentUser,compact=false){
   const locked=(await client.query('SELECT revision FROM wms_meta WHERE id=1 FOR UPDATE')).rows[0];
   const actual=Number(locked?.revision||1);
   if(expectedRevision!=null && Number(expectedRevision)!==actual){const e=new Error('El inventario cambió en otro equipo. Recarga antes de guardar.');e.status=409;e.code='REVISION_CONFLICT';throw e;}
@@ -208,7 +210,8 @@ export async function replaceState(client,state,expectedRevision,currentUser){
     await replaceTableBulk(client,table,state[table]);
   }
   const next=actual+1;
-  await client.query('UPDATE wms_meta SET revision=$1,settings=$2::jsonb,planning=$3::jsonb,updated_at=now() WHERE id=1',[next,JSON.stringify(state.settings||{}),JSON.stringify(state.planning||{})]);
+  const updated=(await client.query('UPDATE wms_meta SET revision=$1,settings=$2::jsonb,planning=$3::jsonb,updated_at=now() WHERE id=1 RETURNING updated_at',[next,JSON.stringify(state.settings||{}),JSON.stringify(state.planning||{})])).rows[0];
+  if(compact)return {compact:true,meta:{version:15,revision:next,updatedAt:updated?.updated_at}};
   return readState(client,currentUser);
 }
 

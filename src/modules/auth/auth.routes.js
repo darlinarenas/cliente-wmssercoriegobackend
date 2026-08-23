@@ -61,7 +61,7 @@ authRouter.post('/recover-admin',adminRecoveryLimiter,async(req,res,next)=>{try{
 
 const supercodeLimiter=rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:true,legacyHeaders:false,message:{error:'Demasiados intentos de supercódigo. Intenta nuevamente en unos minutos.'}});
 authRouter.post('/verify-supercode',requireAuth,supercodeLimiter,async(req,res,next)=>{try{
-  if(req.user?.role!=='ADMINISTRADOR') return res.status(403).json({error:'Solo un administrador puede autorizar eliminaciones.'});
+  if(!['ADMIN_GLOBAL','ADMINISTRADOR'].includes(req.user?.role)) return res.status(403).json({error:'Solo un administrador puede autorizar eliminaciones.'});
   const supercode=String(req.body?.supercode||'');
   if(!supercode) return res.status(400).json({error:'Ingresa el supercódigo administrativo.'});
   const {rows}=await pool.query('SELECT password_hash FROM users WHERE id=$1',[req.user.id]);
