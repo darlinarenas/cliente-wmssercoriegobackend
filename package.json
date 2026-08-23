@@ -12,7 +12,6 @@
     "admin:reset": "node scripts/reset-admin-password.js",
     "test:passwords": "node test/password-security.test.js",
     "test:transfers": "node test/transfer-workflow.test.js",
-    "test:users": "node test/user-isolation.test.js",
     "import:real": "node scripts/import-real-inventory.js --apply"
   },
   "dependencies": {

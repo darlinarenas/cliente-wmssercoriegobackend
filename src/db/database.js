@@ -7,7 +7,7 @@ const { Pool } = pg;
 if(!env.databaseUrl) console.warn('[WMS] DATABASE_URL no configurada.');
 export const pool = new Pool({connectionString:env.databaseUrl,ssl:env.databaseSsl?{rejectUnauthorized:false}:false});
 
-const ENTITY_TABLES=['companies','sites','sectors','racks','locations','products','product_codes','inventory','pallets','receipts','transfers','orders','movements','audit'];
+const ENTITY_TABLES=['companies','sites','sectors','racks','locations','products','product_codes','inventory','pallets','receipts','transfers','shipments','tasks','orders','movements','audit'];
 
 const schemaSql=`
 CREATE TABLE IF NOT EXISTS wms_meta (
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   username TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('ADMINISTRADOR','ENCARGADO','OPERADOR_BODEGA','OPERADOR_RECEPCION')),
+  role TEXT NOT NULL CHECK (role IN ('ADMINISTRADOR','ENCARGADO','OPERADOR_BODEGA','OPERADOR_RECEPCION','TRANSPORTISTA')),
   active BOOLEAN NOT NULL DEFAULT true,
   must_change_password BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS inventory (id TEXT PRIMARY KEY, product_code TEXT NOT
 CREATE TABLE IF NOT EXISTS pallets (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS transfers (id TEXT PRIMARY KEY, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS shipments (id TEXT PRIMARY KEY, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS movements (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS audit (id TEXT PRIMARY KEY, data JSONB NOT NULL);
@@ -55,7 +57,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS access_assignments JSONB NOT NULL DEF
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_access_status_check;
 ALTER TABLE users ADD CONSTRAINT users_access_status_check CHECK (access_status IN ('ACTIVE','PAUSED','DISABLED'));
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
-ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('ADMIN_GLOBAL','ADMINISTRADOR','ENCARGADO','OPERADOR_BODEGA','OPERADOR_RECEPCION'));
+ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('ADMIN_GLOBAL','ADMINISTRADOR','ENCARGADO','OPERADOR_BODEGA','OPERADOR_RECEPCION','TRANSPORTISTA'));
 `;
 
 function makeUserId(name){
@@ -123,6 +125,8 @@ export async function readState(client=pool,currentUser=null){
       COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM pallets),'[]'::jsonb) AS pallets,
       COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM receipts),'[]'::jsonb) AS receipts,
       COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM transfers),'[]'::jsonb) AS transfers,
+      COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM shipments),'[]'::jsonb) AS shipments,
+      COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM tasks),'[]'::jsonb) AS tasks,
       COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM orders),'[]'::jsonb) AS orders,
       COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM movements),'[]'::jsonb) AS movements,
       COALESCE((SELECT jsonb_agg(data ORDER BY id) FROM audit),'[]'::jsonb) AS audit,
@@ -162,6 +166,8 @@ export async function readState(client=pool,currentUser=null){
     pallets:row?.pallets||[],
     receipts:row?.receipts||[],
     transfers:row?.transfers||[],
+    shipments:row?.shipments||[],
+    tasks:row?.tasks||[],
     orders:row?.orders||[],
     movements:row?.movements||[],
     audit:row?.audit||[],
