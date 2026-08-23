@@ -89,6 +89,11 @@ export async function ensureDatabase(){
         VALUES('USR-ADMIN',$1,$2,$3,'ADMINISTRADOR',true,true)
         ON CONFLICT(id) DO NOTHING`,[env.adminName,env.adminUsername.toLowerCase(),hash]);
     }
+    // Invariante de seguridad: USR-ADMIN siempre conserva acceso general.
+    // No modifica nombre, usuario, contraseña ni ningún otro usuario.
+    await client.query(`UPDATE users
+      SET role='ADMIN_GLOBAL',active=true,access_status='ACTIVE',access_assignments='[]'::jsonb,site_ids='[]'::jsonb,company_ids='[]'::jsonb,updated_at=now()
+      WHERE id='USR-ADMIN' AND (role<>'ADMIN_GLOBAL' OR active IS NOT TRUE OR access_status<>'ACTIVE' OR access_assignments<>'[]'::jsonb OR site_ids<>'[]'::jsonb OR company_ids<>'[]'::jsonb)`);
     const count=(await client.query('SELECT count(*)::int AS n FROM products')).rows[0].n;
     if(count===0){
       for(const table of ENTITY_TABLES){
