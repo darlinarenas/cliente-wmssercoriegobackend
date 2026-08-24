@@ -34,7 +34,7 @@ authRouter.post('/login',loginLimiter,async(req,res,next)=>{try{
 
   const token=jwt.sign({sub:u.id,role:u.role},env.jwtSecret,{expiresIn:env.jwtExpiresIn});
   const user=publicUser(u);
-  const state=await readState(undefined,user);
+  const state=await readState(undefined,user,(user.companyIds||[])[0]||'SERCO_RIEGO');
   res.json({token,user,state});
 }catch(e){next(e);}});
 

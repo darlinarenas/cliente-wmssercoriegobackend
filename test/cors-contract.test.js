@@ -10,12 +10,13 @@ try{
     headers:{
       Origin:'https://cliente-wmssercoriego-q7w5.vercel.app',
       'Access-Control-Request-Method':'PUT',
-      'Access-Control-Request-Headers':'authorization,content-type,x-wms-compact,x-wms-site'
+      'Access-Control-Request-Headers':'authorization,content-type,x-wms-compact,x-wms-site,x-wms-company'
     }
   });
   assert.equal(response.status,204,'El preflight de guardado debe ser aceptado');
   const allowed=String(response.headers.get('access-control-allow-headers')||'').toLowerCase();
   assert.match(allowed,/x-wms-compact/,'CORS debe permitir X-WMS-Compact');
+  assert.match(allowed,/x-wms-company/,'CORS debe permitir el contexto empresarial');
   assert.equal(response.headers.get('access-control-allow-origin'),'https://cliente-wmssercoriego-q7w5.vercel.app');
   console.log('OK · preflight CORS del guardado PUT permite X-WMS-Compact');
 }finally{
