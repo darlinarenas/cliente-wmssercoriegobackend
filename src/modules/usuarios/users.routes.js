@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { pool, makeUserId } from '../../db/database.js';
 import { requireRole } from '../../middleware/auth.js';
 import { storePassword, verifyPassword } from '../../security/passwords.js';
+import { sanitizePermissions } from '../../security/permissions.js';
 
 export const usersRouter=Router();
 usersRouter.use(requireRole('ADMIN_GLOBAL','ADMINISTRADOR'));
@@ -18,7 +19,7 @@ function validate(body,creating=false){
  const siteIds=Array.isArray(body.siteIds)?[...new Set(body.siteIds.map(x=>String(x).trim()).filter(Boolean))]:[];
  const companyIds=Array.isArray(body.companyIds)?[...new Set(body.companyIds.map(x=>String(x).trim()).filter(Boolean))]:[];
  const accessStatus=['ACTIVE','PAUSED','DISABLED'].includes(body.accessStatus)?body.accessStatus:(body.active===false?'DISABLED':'ACTIVE');
- const accessAssignments=Array.isArray(body.accessAssignments)?body.accessAssignments.map(a=>({companyId:String(a?.companyId||'').trim(),siteId:String(a?.siteId||'').trim(),role:String(a?.role||'')})).filter(a=>a.companyId&&a.siteId&&roles.has(a.role)&&a.role!=='ADMIN_GLOBAL'):[];
+ const accessAssignments=Array.isArray(body.accessAssignments)?body.accessAssignments.map(a=>({companyId:String(a?.companyId||'').trim(),siteId:String(a?.siteId||'').trim(),role:String(a?.role||''),customPermissions:a?.customPermissions===true,permissions:a?.customPermissions===true?sanitizePermissions(a?.permissions):{}})).filter(a=>a.companyId&&a.siteId&&roles.has(a.role)&&a.role!=='ADMIN_GLOBAL'):[];
  if(role==='ADMINISTRADOR'&&!siteIds.length)throw Object.assign(new Error('El administrador de centro debe tener al menos un centro asignado. Usa Administrador general para acceso total.'),{status:400});
  return{name,username,role,password,active:accessStatus==='ACTIVE',accessStatus,accessAssignments,siteIds,companyIds};
 }
