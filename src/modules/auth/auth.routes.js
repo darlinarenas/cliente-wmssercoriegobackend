@@ -2,7 +2,7 @@ import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import crypto from 'node:crypto';
-import { pool, readState } from '../../db/database.js';
+import { pool } from '../../db/database.js';
 import { env } from '../../config/env.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { storePassword, verifyPassword } from '../../security/passwords.js';
@@ -34,8 +34,9 @@ authRouter.post('/login',loginLimiter,async(req,res,next)=>{try{
 
   const token=jwt.sign({sub:u.id,role:u.role},env.jwtSecret,{expiresIn:env.jwtExpiresIn});
   const user=publicUser(u);
-  const state=await readState(undefined,user,(user.companyIds||[])[0]||'SERCO_RIEGO');
-  res.json({token,user,state});
+  const allowed=user.role==='ADMIN_GLOBAL'?null:(user.companyIds||[]);
+  const companies=(await pool.query(`SELECT data FROM companies WHERE $1::text[] IS NULL OR id=ANY($1::text[]) ORDER BY id`,[allowed])).rows.map(r=>r.data).filter(c=>c.active!==false);
+  res.json({token,user,companies});
 }catch(e){next(e);}});
 
 authRouter.get('/me',requireAuth,(req,res)=>res.json({user:req.user}));
