@@ -116,7 +116,7 @@ UPDATE movements SET data=jsonb_set(data,'{companyId}',to_jsonb(company_id),true
 UPDATE audit SET data=jsonb_set(data,'{companyId}',to_jsonb(company_id),true);
 INSERT INTO wms_company_meta(company_id,revision,settings,planning)
 SELECT c.id,COALESCE(m.revision,1),COALESCE(m.settings,'{}'::jsonb),COALESCE(m.planning,'{}'::jsonb)
-FROM companies c CROSS JOIN wms_meta m ON m.id=1 ON CONFLICT(company_id) DO NOTHING;
+FROM companies c JOIN wms_meta m ON m.id=1 ON CONFLICT(company_id) DO NOTHING;
 CREATE INDEX IF NOT EXISTS idx_sites_company ON sites(company_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_company_product ON inventory(company_id,product_code);
 CREATE INDEX IF NOT EXISTS idx_orders_company ON orders(company_id);
