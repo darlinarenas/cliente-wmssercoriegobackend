@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
 import { INITIAL_STATE } from '../src/db/initial-state.js';
 import { upgradeState } from '../../src/services/state-upgrade.js';
+import { userPermissions } from '../src/security/permissions.js';
 
 global.window={SERCO_WMS_API_BASE_URL:'/api'};
 global.localStorage={_m:new Map(),getItem(k){return this._m.get(k)||null;},setItem(k,v){this._m.set(k,String(v));},removeItem(k){this._m.delete(k);}};
+
+const operator={role:'OPERADOR_BODEGA',accessAssignments:[{companyId:'C1',siteId:'S1',role:'OPERADOR_BODEGA'}]};
+assert.deepEqual(Object.fromEntries(Object.entries(userPermissions(operator,'C1','S1')).filter(([key])=>key.startsWith('pallets'))),{palletsView:true,palletsOperate:true,palletsRegister:false});
+const legacyCustom={role:'OPERADOR_BODEGA',accessAssignments:[{companyId:'C1',siteId:'S1',role:'OPERADOR_BODEGA',customPermissions:true,permissions:{codesConsult:true}}]};
+assert.equal(userPermissions(legacyCustom,'C1','S1').palletsOperate,true,'los permisos personalizados antiguos deben heredar de forma segura los nuevos permisos de pallets');
 
 assert.ok(Array.isArray(INITIAL_STATE.companies),'companies debe ser arreglo');
 assert.ok(INITIAL_STATE.companies.some(c=>c.id==='SERCO_RIEGO'),'Serco Riego debe existir como empresa inicial');

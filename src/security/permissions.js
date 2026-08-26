@@ -1,8 +1,9 @@
-export const PERMISSION_KEYS=['codesConsult','codesAssociate','productsEdit','inventoryAdjust'];
+export const PERMISSION_KEYS=['codesConsult','codesAssociate','productsEdit','inventoryAdjust','palletsView','palletsOperate','palletsRegister'];
 
 export function rolePermissions(role){
  const manage=['ADMIN_GLOBAL','ADMINISTRADOR','ENCARGADO'].includes(role);
- return {codesConsult:manage||['OPERADOR_BODEGA','OPERADOR_RECEPCION'].includes(role),codesAssociate:manage,productsEdit:manage,inventoryAdjust:manage};
+ const operator=manage||['OPERADOR_BODEGA','OPERADOR_RECEPCION'].includes(role);
+ return {codesConsult:operator,codesAssociate:manage,productsEdit:manage,inventoryAdjust:manage,palletsView:operator,palletsOperate:operator,palletsRegister:manage};
 }
 
 export function sanitizePermissions(value){
@@ -17,11 +18,14 @@ export function effectiveAssignment(user,companyId,siteId){
 export function userPermissions(user,companyId,siteId){
  if(user?.role==='ADMIN_GLOBAL')return rolePermissions('ADMIN_GLOBAL');
  const assignment=effectiveAssignment(user,companyId,siteId),role=assignment?.role||user?.role;
- return assignment?.customPermissions===true?sanitizePermissions(assignment.permissions):rolePermissions(role);
+ if(assignment?.customPermissions!==true)return rolePermissions(role);
+ const source=assignment.permissions||{},permissions=sanitizePermissions(source),defaults=rolePermissions(role);
+ ['palletsView','palletsOperate','palletsRegister'].forEach(key=>{if(typeof source[key]!=='boolean')permissions[key]=defaults[key];});
+ return permissions;
 }
 
 export function requireOperations(...operations){
- const operationPermission={codesAssociate:'codesAssociate',productsEdit:'productsEdit',inventoryAdjust:'inventoryAdjust'};
+ const operationPermission={codesAssociate:'codesAssociate',productsEdit:'productsEdit',inventoryAdjust:'inventoryAdjust',palletsOperate:'palletsOperate',palletsRegister:'palletsRegister'};
  return (req,res,next)=>{
   const siteId=String(req.get('X-WMS-Site')||'').trim(),permissions=userPermissions(req.user,req.companyId,siteId);
   const denied=operations.find(operation=>!permissions[operationPermission[operation]]);
