@@ -14,12 +14,12 @@ assert.ok(Array.isArray(INITIAL_STATE.product_codes),'product_codes debe existir
 assert.ok(Array.isArray(INITIAL_STATE.orders),'orders debe existir');
 
 const legacy={meta:{version:13},settings:{},session:{userId:'U',activeSiteId:'REC'},sites:[{id:'REC',name:'Recoleta',parentSiteId:null},{id:'VIT',name:'Vitacura',parentSiteId:'REC'}],users:[{id:'U',role:'ENCARGADO',siteIds:['REC']}],product_codes:[],orders:[],racks:[],locations:[],inventory:[],pallets:[]};
-assert.equal(upgradeState(legacy),true,'la migración V16 debe detectar cambios');
+assert.equal(upgradeState(legacy),true,'la migración V17 debe detectar cambios');
 assert.equal(legacy.companies[0].id,'SERCO_RIEGO');
 assert.equal(legacy.sites[1].companyId,'SERCO_RIEGO');
 assert.equal('parentSiteId' in legacy.sites[1],false,'dependencia debe desaparecer');
 assert.deepEqual(legacy.users[0].companyIds,['SERCO_RIEGO']);
-assert.equal(legacy.meta.version,16);
+assert.equal(legacy.meta.version,17);
 assert.deepEqual(legacy.shipments,[]);
 assert.deepEqual(legacy.tasks,[]);
 
@@ -33,6 +33,8 @@ assert.deepEqual(stockStatus('P1','REC',sample,'O1'),{physical:18,reserved:0,ava
 const legacyPhysical={meta:{version:14},settings:{},session:{userId:'U',activeSiteId:'REC'},companies:[{id:'SERCO_RIEGO',active:true}],sites:[{id:'REC',companyId:'SERCO_RIEGO',active:true},{id:'VIT',companyId:'SERCO_RIEGO',active:true}],users:[{id:'U',role:'ADMINISTRADOR',siteIds:[],companyIds:[]}],racks:[{id:'R1',siteId:'REC',levels:1,modules:1}],locations:[{id:'REC-R1-M1-N1',siteId:'REC',rackId:'R1',active:true}],pallets:[{id:'PAL-1',locationId:'REC-R1-M1-N1'}],inventory:[{id:'I1',productCode:'P1',locationId:'REC-R1-M1-N1',palletId:'PAL-1',qty:10}],receipts:[{id:'REC-1',palletId:'PAL-1',status:'CERRADA'}],movements:[],transfers:[],orders:[],product_codes:[]};
 upgradeState(legacyPhysical);
 assert.equal(legacyPhysical.pallets[0].siteId,'REC','los pallets legados deben quedar en Recoleta');
+assert.equal(legacyPhysical.pallets[0].physicalCode,'PAL-1','el pallet legado conserva su ID y recibe un código físico permanente');
+assert.equal(legacyPhysical.pallets[0].type,'FISICO_PERMANENTE');
 assert.equal(legacyPhysical.inventory[0].siteId,'REC','el inventario legado debe quedar en Recoleta');
 assert.equal(legacyPhysical.receipts[0].siteId,'REC','las recepciones legadas deben quedar en Recoleta');
 assert.equal(legacyPhysical.racks.some(r=>r.siteId==='VIT'),false,'Vitacura no debe heredar racks de Recoleta');
@@ -46,9 +48,9 @@ assert.equal(take.ok,true);
 assert.equal(isolated.inventory.find(i=>i.id==='IR').qty,1);
 assert.equal(isolated.inventory.find(i=>i.id==='IV').qty,9,'un despacho de Recoleta no puede descontar Vitacura');
 
-console.log('OK · estructura V16 multiempresa, cargas, aislamiento por centro, migración y stock reservado válidos');
+console.log('OK · estructura V17 multiempresa, pallets permanentes, aislamiento por centro, migración y stock reservado válidos');
 
-const { moveWholePallet,canReceiveWholePallet }=await import('../../src/services/pallet-ops.js');
+const { assignProductToPallet,moveWholePallet,canReceiveWholePallet,registerPermanentPallet }=await import('../../src/services/pallet-ops.js');
 const palletMove={
   session:{userId:'USR-ADMIN'},
   locations:[
@@ -76,3 +78,18 @@ assert.ok(palletMove.inventory.every(i=>i.locationId==='VIT-R1-M1-N2-A'),'todo e
 assert.equal(palletMove.movements[0].type,'MOVIMIENTO_PALET_COMPLETO');
 const crossMove=moveWholePallet(palletMove,{palletId:'VIT-PAL-0001',siteId:'VIT',destinationLocationId:'REC-TMP-01'});
 assert.equal(crossMove.ok,false,'un pallet de Vitacura no puede moverse a una ubicación de Recoleta desde el centro activo');
+
+const permanent={session:{userId:'U1'},sites:[{id:'REC',companyId:'SERCO_RIEGO',active:true}],locations:[{id:'REC-R1-M1-N2-A',siteId:'REC',kind:'PALLET_POSITION',active:true,status:'LIBRE'},{id:'REC-ORIGEN-1',siteId:'REC',kind:'RECEPCION',active:true,status:'OCUPADA'},{id:'REC-ORIGEN-2',siteId:'REC',kind:'RECEPCION',active:true,status:'OCUPADA'}],pallets:[],inventory:[{id:'A',siteId:'REC',productCode:'COD-A',locationId:'REC-ORIGEN-1',palletId:null,qty:10},{id:'B',siteId:'REC',productCode:'COD-B',locationId:'REC-ORIGEN-2',palletId:null,qty:7}],movements:[]};
+const registered=registerPermanentPallet(permanent,{identifier:'O',siteId:'REC',userId:'U1'});
+assert.equal(registered.ok,true);
+assert.equal(registered.pallet.id,'PAL-O');
+assert.equal(registered.pallet.status,'VACÍO');
+assert.equal(registered.pallet.permanent,true);
+assert.equal(assignProductToPallet(permanent,{palletId:'PAL-O',siteId:'REC',code:'COD-A',qty:6,sourceKey:'REC-ORIGEN-1@@',userId:'U1'}).ok,true);
+assert.equal(assignProductToPallet(permanent,{palletId:'PAL-O',siteId:'REC',code:'COD-B',qty:7,sourceKey:'REC-ORIGEN-2@@',userId:'U1'}).ok,true);
+assert.equal(new Set(permanent.inventory.filter(i=>i.palletId==='PAL-O').map(i=>i.productCode)).size,2,'un pallet físico debe admitir varios productos');
+const positioned=moveWholePallet(permanent,{palletId:'PAL-O',siteId:'REC',destinationLocationId:'REC-R1-M1-N2-A',userId:'U1'});
+assert.equal(positioned.ok,true);
+assert.equal(positioned.skuCount,2);
+assert.ok(permanent.inventory.filter(i=>i.palletId==='PAL-O').every(i=>i.locationId==='REC-R1-M1-N2-A'),'todos los productos deben compartir la posición del pallet');
+assert.equal(permanent.pallets[0].locationId,'REC-R1-M1-N2-A');
