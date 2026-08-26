@@ -7,7 +7,7 @@ global.window={SERCO_WMS_API_BASE_URL:'/api'};
 global.localStorage={_m:new Map(),getItem(k){return this._m.get(k)||null;},setItem(k,v){this._m.set(k,String(v));},removeItem(k){this._m.delete(k);}};
 
 const operator={role:'OPERADOR_BODEGA',accessAssignments:[{companyId:'C1',siteId:'S1',role:'OPERADOR_BODEGA'}]};
-assert.deepEqual(Object.fromEntries(Object.entries(userPermissions(operator,'C1','S1')).filter(([key])=>key.startsWith('pallets'))),{palletsView:true,palletsOperate:true,palletsRegister:false});
+assert.deepEqual(Object.fromEntries(Object.entries(userPermissions(operator,'C1','S1')).filter(([key])=>key.startsWith('pallets'))),{palletsView:true,palletsOperate:true,palletsRegister:false,palletsEdit:false});
 const legacyCustom={role:'OPERADOR_BODEGA',accessAssignments:[{companyId:'C1',siteId:'S1',role:'OPERADOR_BODEGA',customPermissions:true,permissions:{codesConsult:true}}]};
 assert.equal(userPermissions(legacyCustom,'C1','S1').palletsOperate,true,'los permisos personalizados antiguos deben heredar de forma segura los nuevos permisos de pallets');
 
@@ -56,7 +56,7 @@ assert.equal(isolated.inventory.find(i=>i.id==='IV').qty,9,'un despacho de Recol
 
 console.log('OK · estructura V17 multiempresa, pallets permanentes, aislamiento por centro, migración y stock reservado válidos');
 
-const { assignProductToPallet,moveWholePallet,canReceiveWholePallet,registerPermanentPallet }=await import('../../src/services/pallet-ops.js');
+const { assignProductToPallet,moveWholePallet,canReceiveWholePallet,editPalletDisplayName,registerPermanentPallet }=await import('../../src/services/pallet-ops.js');
 const palletMove={
   session:{userId:'USR-ADMIN'},
   locations:[
@@ -89,6 +89,10 @@ const permanent={session:{userId:'U1'},sites:[{id:'REC',companyId:'SERCO_RIEGO',
 const registered=registerPermanentPallet(permanent,{identifier:'O',siteId:'REC',userId:'U1'});
 assert.equal(registered.ok,true);
 assert.equal(registered.pallet.id,'PAL-O');
+assert.equal(registered.pallet.displayName,'Pallet O');
+assert.equal(editPalletDisplayName(permanent,{palletId:'PAL-O',siteId:'REC',displayName:'Pallet 1',userId:'U1'}).ok,true);
+assert.equal(permanent.pallets[0].displayName,'Pallet 1');
+assert.equal(permanent.pallets[0].id,'PAL-O','editar el nombre visible no debe cambiar el ID permanente');
 assert.equal(registered.pallet.status,'VACÍO');
 assert.equal(registered.pallet.permanent,true);
 assert.equal(assignProductToPallet(permanent,{palletId:'PAL-O',siteId:'REC',code:'COD-A',qty:6,sourceKey:'REC-ORIGEN-1@@',userId:'U1'}).ok,true);
