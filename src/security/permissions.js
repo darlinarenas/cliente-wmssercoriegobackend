@@ -1,9 +1,9 @@
-export const PERMISSION_KEYS=['codesConsult','codesAssociate','productsEdit','inventoryAdjust','inventoryCount','inventoryManage','inventoryReview','palletsView','palletsOperate','palletsRegister','palletsEdit'];
+export const PERMISSION_KEYS=['codesConsult','codesAssociate','productsEdit','inventoryAdjust','physicalStockAdjust','labelsPrint','inventoryCount','inventoryManage','inventoryReview','palletsView','palletsOperate','palletsRegister','palletsEdit','changeSku','reconcileErp','applyErpStock','ordersCancel'];
 
 export function rolePermissions(role){
  const manage=['ADMIN_GLOBAL','ADMINISTRADOR','ENCARGADO'].includes(role);
  const operator=manage||['OPERADOR_BODEGA','OPERADOR_RECEPCION'].includes(role);
- return {codesConsult:operator,codesAssociate:manage,productsEdit:manage,inventoryAdjust:manage,inventoryCount:manage,inventoryManage:manage,inventoryReview:manage,palletsView:operator,palletsOperate:operator,palletsRegister:manage,palletsEdit:manage};
+ return {codesConsult:operator,codesAssociate:manage,productsEdit:manage,inventoryAdjust:manage,physicalStockAdjust:manage,labelsPrint:manage,inventoryCount:manage,inventoryManage:manage,inventoryReview:manage,palletsView:operator,palletsOperate:operator,palletsRegister:manage,palletsEdit:manage,changeSku:manage,reconcileErp:manage,applyErpStock:manage,ordersCancel:manage};
 }
 
 export function sanitizePermissions(value){
@@ -20,12 +20,12 @@ export function userPermissions(user,companyId,siteId){
  const assignment=effectiveAssignment(user,companyId,siteId),role=assignment?.role||user?.role;
  if(assignment?.customPermissions!==true)return rolePermissions(role);
  const source=assignment.permissions||{},permissions=sanitizePermissions(source),defaults=rolePermissions(role);
- ['inventoryCount','inventoryManage','inventoryReview','palletsView','palletsOperate','palletsRegister','palletsEdit'].forEach(key=>{if(typeof source[key]!=='boolean')permissions[key]=defaults[key];});
+ ['physicalStockAdjust','labelsPrint','inventoryCount','inventoryManage','inventoryReview','palletsView','palletsOperate','palletsRegister','palletsEdit','changeSku','reconcileErp','applyErpStock','ordersCancel'].forEach(key=>{if(typeof source[key]!=='boolean')permissions[key]=defaults[key];});
  return permissions;
 }
 
 export function requireOperations(...operations){
- const operationPermission={codesAssociate:'codesAssociate',productsEdit:'productsEdit',inventoryAdjust:'inventoryAdjust',inventoryCount:'inventoryCount',inventoryManage:'inventoryManage',inventoryReview:'inventoryReview',palletsOperate:'palletsOperate',palletsRegister:'palletsRegister',palletsEdit:'palletsEdit'};
+ const operationPermission={codesAssociate:'codesAssociate',productsEdit:'productsEdit',inventoryAdjust:'inventoryAdjust',physicalStockAdjust:'physicalStockAdjust',inventoryCount:'inventoryCount',inventoryManage:'inventoryManage',inventoryReview:'inventoryReview',palletsOperate:'palletsOperate',palletsRegister:'palletsRegister',palletsEdit:'palletsEdit'};
  return (req,res,next)=>{
   const siteId=String(req.get('X-WMS-Site')||'').trim(),permissions=userPermissions(req.user,req.companyId,siteId);
   const denied=operations.find(operation=>!permissions[operationPermission[operation]]);
