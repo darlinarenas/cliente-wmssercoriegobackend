@@ -3,7 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { pool, makeUserId } from '../../db/database.js';
 import { requireRole } from '../../middleware/auth.js';
 import { storePassword, verifyPassword } from '../../security/passwords.js';
-import { sanitizePermissions } from '../../security/permissions.js';
+import { sanitizePermissions, PERMISSION_SCHEMA_VERSION } from '../../security/permissions.js';
 
 export const usersRouter=Router();
 usersRouter.use(requireRole('ADMIN_GLOBAL','ADMINISTRADOR'));
@@ -32,14 +32,14 @@ usersRouter.get('/',async(req,res,next)=>{try{res.set('Cache-Control','no-store'
 
 usersRouter.post('/',async(req,res,next)=>{try{
  const v=validate(req.body,true);enforceAdminScope(req.user,v,req.companyId);let id=makeUserId(v.name),n=2;while((await pool.query('SELECT 1 FROM users WHERE id=$1',[id])).rowCount)id=`${makeUserId(v.name)}-${n++}`;
- const storedPassword=storePassword(v.password);const {rows}=await pool.query(`INSERT INTO users(id,name,username,password_hash,role,active,access_status,access_assignments,site_ids,company_ids,must_change_password) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,false) RETURNING ${publicUserSql()}`,[id,v.name,v.username,storedPassword,v.role,v.active,v.accessStatus,JSON.stringify(v.accessAssignments),JSON.stringify(v.siteIds),JSON.stringify(v.companyIds)]);res.status(201).json(rows[0]);
+ const storedPassword=storePassword(v.password);const {rows}=await pool.query(`INSERT INTO users(id,name,username,password_hash,role,active,access_status,access_assignments,site_ids,company_ids,must_change_password) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,false) RETURNING ${publicUserSql()}`,[id,v.name,v.username,storedPassword,v.role,v.active,v.accessStatus,JSON.stringify(v.accessAssignments),JSON.stringify(v.siteIds),JSON.stringify(v.companyIds)]);res.status(201).json({...rows[0],permissionSchemaVersion:PERMISSION_SCHEMA_VERSION});
 }catch(e){if(e.code==='23505')e=Object.assign(new Error('Ese nombre de usuario ya existe.'),{status:409});next(e);}});
 
 usersRouter.put('/:id',async(req,res,next)=>{try{
  assertTargetIdentity(req.params.id,req.body?.targetUserId);
  const v=validate(req.body,false),target=(await pool.query('SELECT role,site_ids AS "siteIds",company_ids AS "companyIds" FROM users WHERE id=$1',[req.params.id])).rows[0];if(!target)return res.status(404).json({error:'Usuario no encontrado.'});const requesterGlobal=req.user?.role==='ADMIN_GLOBAL';if(target.role!=='ADMIN_GLOBAL'&&!(target.companyIds||[]).includes(req.companyId))return res.status(404).json({error:'Usuario no encontrado en esta empresa.'});if(!requesterGlobal&&(target.role==='ADMIN_GLOBAL'||!(target.siteIds||[]).some(id=>(req.user.siteIds||[]).includes(id))))return res.status(403).json({error:'No puedes modificar un usuario fuera de tu centro.'});enforceAdminScope(req.user,v,req.companyId);protectPrimaryAdmin(req.params.id,v);if(req.params.id===req.user.id&&v.accessStatus!=='ACTIVE')return res.status(400).json({error:'No puedes pausar ni desactivar tu propia sesión.'});
  const {rows}=await pool.query(`UPDATE users SET name=$1,username=$2,role=$3,active=$4,access_status=$5,access_assignments=$6::jsonb,site_ids=$7::jsonb,company_ids=$8::jsonb,updated_at=now() WHERE id=$9 RETURNING ${publicUserSql()}`,[v.name,v.username,v.role,v.active,v.accessStatus,JSON.stringify(v.accessAssignments),JSON.stringify(v.siteIds),JSON.stringify(v.companyIds),req.params.id]);
- if(rows.length!==1)return res.status(409).json({error:'No se pudo confirmar una actualización individual del usuario.'});res.set('Cache-Control','no-store');const confirmed=(await pool.query(`SELECT ${publicUserSql()} FROM users WHERE id=$1`,[req.params.id])).rows[0];if(!confirmed)return res.status(409).json({error:'El usuario se actualizó pero no se pudo releer para confirmar sus permisos.'});res.json(confirmed);
+ if(rows.length!==1)return res.status(409).json({error:'No se pudo confirmar una actualización individual del usuario.'});res.set('Cache-Control','no-store');const confirmed=(await pool.query(`SELECT ${publicUserSql()} FROM users WHERE id=$1`,[req.params.id])).rows[0];if(!confirmed)return res.status(409).json({error:'El usuario se actualizó pero no se pudo releer para confirmar sus permisos.'});res.json({...confirmed,permissionSchemaVersion:PERMISSION_SCHEMA_VERSION});
 }catch(e){if(e.code==='23505')e=Object.assign(new Error('Ese nombre de usuario ya existe.'),{status:409});next(e);}});
 
 usersRouter.post('/:id/reset-password',passwordResetLimiter,async(req,res,next)=>{try{

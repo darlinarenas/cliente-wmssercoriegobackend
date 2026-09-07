@@ -1,9 +1,10 @@
-export const PERMISSION_KEYS=['codesConsult','codesAssociate','productsEdit','inventoryAdjust','physicalStockAdjust','labelsPrint','mapView','inventoryCount','inventoryManage','inventoryReview','palletsView','palletsOperate','palletsRegister','palletsEdit','changeSku','reconcileErp','applyErpStock','ordersCancel'];
+export const PERMISSION_SCHEMA_VERSION='2026.09.06-pallet-edit-delete-v2';
+export const PERMISSION_KEYS=['codesConsult','codesAssociate','productsEdit','inventoryAdjust','physicalStockAdjust','labelsPrint','mapView','inventoryCount','inventoryManage','inventoryReview','palletsView','palletsOperate','palletsRegister','palletsEdit','palletsDelete','changeSku','reconcileErp','applyErpStock','ordersCancel'];
 
 export function rolePermissions(role){
  const manage=['ADMIN_GLOBAL','ADMINISTRADOR','ENCARGADO'].includes(role);
  const operator=manage||['OPERADOR_BODEGA','OPERADOR_RECEPCION'].includes(role);
- return {codesConsult:operator,codesAssociate:manage,productsEdit:manage,inventoryAdjust:manage,physicalStockAdjust:manage,labelsPrint:manage,mapView:manage,inventoryCount:manage,inventoryManage:manage,inventoryReview:manage,palletsView:operator,palletsOperate:operator,palletsRegister:manage,palletsEdit:manage,changeSku:manage,reconcileErp:manage,applyErpStock:manage,ordersCancel:manage};
+ return {codesConsult:operator,codesAssociate:manage,productsEdit:manage,inventoryAdjust:manage,physicalStockAdjust:manage,labelsPrint:manage,mapView:manage,inventoryCount:manage,inventoryManage:manage,inventoryReview:manage,palletsView:operator,palletsOperate:operator,palletsRegister:manage,palletsEdit:manage,palletsDelete:manage,changeSku:manage,reconcileErp:manage,applyErpStock:manage,ordersCancel:manage};
 }
 
 export function sanitizePermissions(value){
@@ -20,12 +21,12 @@ export function userPermissions(user,companyId,siteId){
  const assignment=effectiveAssignment(user,companyId,siteId),role=assignment?.role||user?.role;
  if(assignment?.customPermissions!==true)return rolePermissions(role);
  const source=assignment.permissions||{},permissions=sanitizePermissions(source),defaults=rolePermissions(role);
- ['physicalStockAdjust','labelsPrint','mapView','inventoryCount','inventoryManage','inventoryReview','palletsView','palletsOperate','palletsRegister','palletsEdit','changeSku','reconcileErp','applyErpStock','ordersCancel'].forEach(key=>{if(typeof source[key]!=='boolean')permissions[key]=defaults[key];});
+ ['physicalStockAdjust','labelsPrint','mapView','inventoryCount','inventoryManage','inventoryReview','palletsView','palletsOperate','palletsRegister','palletsEdit','palletsDelete','changeSku','reconcileErp','applyErpStock','ordersCancel'].forEach(key=>{if(typeof source[key]!=='boolean')permissions[key]=defaults[key];});
  return permissions;
 }
 
 export function requireOperations(...operations){
- const operationPermission={codesAssociate:'codesAssociate',productsEdit:'productsEdit',inventoryAdjust:'inventoryAdjust',physicalStockAdjust:'physicalStockAdjust',inventoryCount:'inventoryCount',inventoryManage:'inventoryManage',inventoryReview:'inventoryReview',palletsOperate:'palletsOperate',palletsRegister:'palletsRegister',palletsEdit:'palletsEdit'};
+ const operationPermission={codesAssociate:'codesAssociate',productsEdit:'productsEdit',inventoryAdjust:'inventoryAdjust',physicalStockAdjust:'physicalStockAdjust',inventoryCount:'inventoryCount',inventoryManage:'inventoryManage',inventoryReview:'inventoryReview',palletsOperate:'palletsOperate',palletsRegister:'palletsRegister',palletsEdit:'palletsEdit',palletsDelete:'palletsDelete'};
  return (req,res,next)=>{
   const siteId=String(req.get('X-WMS-Site')||'').trim(),permissions=userPermissions(req.user,req.companyId,siteId);
   const denied=operations.find(operation=>!permissions[operationPermission[operation]]);
