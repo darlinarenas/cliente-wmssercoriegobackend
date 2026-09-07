@@ -7,7 +7,7 @@ global.window={SERCO_WMS_API_BASE_URL:'/api'};
 global.localStorage={_m:new Map(),getItem(k){return this._m.get(k)||null;},setItem(k,v){this._m.set(k,String(v));},removeItem(k){this._m.delete(k);}};
 
 const operator={role:'OPERADOR_BODEGA',accessAssignments:[{companyId:'C1',siteId:'S1',role:'OPERADOR_BODEGA'}]};
-assert.deepEqual(Object.fromEntries(Object.entries(userPermissions(operator,'C1','S1')).filter(([key])=>key.startsWith('pallets'))),{palletsView:true,palletsOperate:true,palletsRegister:false,palletsEdit:false});
+assert.deepEqual(Object.fromEntries(Object.entries(userPermissions(operator,'C1','S1')).filter(([key])=>key.startsWith('pallets'))),{palletsView:true,palletsOperate:true,palletsRegister:false,palletsEdit:false,palletsDelete:false,palletsCleanupResidual:false});
 const legacyCustom={role:'OPERADOR_BODEGA',accessAssignments:[{companyId:'C1',siteId:'S1',role:'OPERADOR_BODEGA',customPermissions:true,permissions:{codesConsult:true}}]};
 assert.equal(userPermissions(legacyCustom,'C1','S1').palletsOperate,true,'los permisos personalizados antiguos deben heredar de forma segura los nuevos permisos de pallets');
 
@@ -56,7 +56,7 @@ assert.equal(isolated.inventory.find(i=>i.id==='IV').qty,9,'un despacho de Recol
 
 console.log('OK · estructura V17 multiempresa, pallets permanentes, aislamiento por centro, migración y stock reservado válidos');
 
-const { assignProductToPallet,moveWholePallet,canReceiveWholePallet,editPalletDisplayName,registerPermanentPallet }=await import('../../src/services/pallet-ops.js');
+const { assignProductToPallet,moveWholePallet,canReceiveWholePallet,deleteEmptyPallet,editPalletDisplayName,registerPermanentPallet }=await import('../../src/services/pallet-ops.js');
 const palletMove={
   session:{userId:'USR-ADMIN'},
   locations:[
@@ -93,6 +93,13 @@ assert.equal(registered.pallet.displayName,'Pallet O');
 assert.equal(editPalletDisplayName(permanent,{palletId:'PAL-O',siteId:'REC',displayName:'Pallet 1',userId:'U1'}).ok,true);
 assert.equal(permanent.pallets[0].displayName,'Pallet 1');
 assert.equal(permanent.pallets[0].id,'PAL-O','editar el nombre visible no debe cambiar el ID permanente');
+const emptyDeleteState={session:{userId:'U1'},sites:[{id:'REC',companyId:'SERCO_RIEGO',active:true}],locations:[{id:'REC-PALLETS-SIN-UBICAR',siteId:'REC',kind:'PALLET_STAGING',active:true,status:'OCUPADA'}],pallets:[{id:'PAL-X',physicalCode:'PAL-X',displayName:'P-X',siteId:'REC',status:'VACÍO',locationId:'REC-PALLETS-SIN-UBICAR'}],inventory:[],tasks:[],receipts:[],movements:[]};
+assert.equal(deleteEmptyPallet(emptyDeleteState,{palletId:'PAL-X',siteId:'REC',userId:'U1'}).ok,true,'un pallet vacío debe poder eliminarse');
+assert.equal(emptyDeleteState.pallets.length,0,'el pallet vacío debe retirarse del catálogo activo');
+assert.equal(emptyDeleteState.locations[0].status,'LIBRE','la ubicación debe liberarse al eliminar el pallet vacío');
+const occupiedDeleteState={session:{userId:'U1'},pallets:[{id:'PAL-Y',siteId:'REC',status:'UBICADO',locationId:'L1'}],inventory:[{id:'I1',siteId:'REC',productCode:'A',locationId:'L1',palletId:'PAL-Y',qty:1}],tasks:[],receipts:[],locations:[{id:'L1',siteId:'REC',active:true,status:'OCUPADA'}],movements:[]};
+assert.equal(deleteEmptyPallet(occupiedDeleteState,{palletId:'PAL-Y',siteId:'REC',userId:'U1'}).ok,false,'un pallet con stock nunca debe eliminarse');
+
 assert.equal(registered.pallet.status,'VACÍO');
 assert.equal(registered.pallet.permanent,true);
 assert.equal(assignProductToPallet(permanent,{palletId:'PAL-O',siteId:'REC',code:'COD-A',qty:6,sourceKey:'REC-ORIGEN-1@@',userId:'U1'}).ok,true);
