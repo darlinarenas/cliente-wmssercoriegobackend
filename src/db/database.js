@@ -47,6 +47,39 @@ CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS movements (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS audit (id TEXT PRIMARY KEY, data JSONB NOT NULL);
+
+CREATE TABLE IF NOT EXISTS print_stations (
+  id TEXT PRIMARY KEY,
+  company_id TEXT NOT NULL,
+  site_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  printer_name TEXT NOT NULL DEFAULT '',
+  active BOOLEAN NOT NULL DEFAULT true,
+  last_seen_at TIMESTAMPTZ,
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS print_jobs (
+  id TEXT PRIMARY KEY,
+  company_id TEXT NOT NULL,
+  site_id TEXT NOT NULL,
+  station_id TEXT NOT NULL REFERENCES print_stations(id) ON DELETE RESTRICT,
+  created_by TEXT,
+  label_type TEXT NOT NULL DEFAULT '',
+  zpl TEXT NOT NULL,
+  copies INTEGER NOT NULL DEFAULT 1 CHECK (copies BETWEEN 1 AND 500),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','claimed','printed','error')),
+  error TEXT NOT NULL DEFAULT '',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  claimed_at TIMESTAMPTZ,
+  printed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_print_stations_scope ON print_stations(company_id,site_id,active);
+CREATE INDEX IF NOT EXISTS idx_print_jobs_station_status ON print_jobs(station_id,status,created_at);
 CREATE TABLE IF NOT EXISTS wms_company_meta (
   company_id TEXT PRIMARY KEY,
   revision BIGINT NOT NULL DEFAULT 1,
