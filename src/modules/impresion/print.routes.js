@@ -58,6 +58,8 @@ printRouter.post('/jobs',async(req,res,next)=>{try{
   if(requestedStation)station=(await pool.query('SELECT * FROM print_stations WHERE id=$1 AND company_id=$2 AND site_id=$3 AND active=true',[requestedStation,req.companyId,siteId])).rows[0];
   else station=(await pool.query('SELECT * FROM print_stations WHERE company_id=$1 AND site_id=$2 AND active=true ORDER BY last_seen_at DESC NULLS LAST,created_at ASC LIMIT 1',[req.companyId,siteId])).rows[0];
   if(!station)return res.status(409).json({error:'No hay una PC puente configurada para este centro.',code:'PRINT_STATION_MISSING'});
+  const lastSeen=station.last_seen_at?new Date(station.last_seen_at).getTime():0;
+  if(!lastSeen||Date.now()-lastSeen>=ONLINE_WINDOW_MS)return res.status(409).json({error:'La PC puente está fuera de línea. Enciéndela y deja Khal Print activo antes de imprimir.',code:'PRINT_STATION_OFFLINE'});
   const id=makeId('PRN');
   await pool.query(`INSERT INTO print_jobs(id,company_id,site_id,station_id,created_by,label_type,zpl,copies)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[id,req.companyId,siteId,station.id,req.user?.id||null,labelType,zpl,copies]);
