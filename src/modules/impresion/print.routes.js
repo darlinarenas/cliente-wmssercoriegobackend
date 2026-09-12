@@ -21,7 +21,8 @@ function validateZpl(zpl){
 }
 function stationView(row){
   const last=row.last_seen_at?new Date(row.last_seen_at).getTime():0;
-  return {id:row.id,siteId:row.site_id,name:row.name,printerName:row.printer_name||'',active:row.active!==false,lastSeenAt:row.last_seen_at||null,online:!!last&&Date.now()-last<ONLINE_WINDOW_MS};
+  const printerName=String(row.printer_name||'').trim();
+  return {id:row.id,siteId:row.site_id,name:row.name,printerName,printerReady:!!printerName,active:row.active!==false,lastSeenAt:row.last_seen_at||null,online:!!last&&Date.now()-last<ONLINE_WINDOW_MS};
 }
 
 export const printRouter=Router();
@@ -60,6 +61,7 @@ printRouter.post('/jobs',async(req,res,next)=>{try{
   if(!station)return res.status(409).json({error:'No hay una PC puente configurada para este centro.',code:'PRINT_STATION_MISSING'});
   const lastSeen=station.last_seen_at?new Date(station.last_seen_at).getTime():0;
   if(!lastSeen||Date.now()-lastSeen>=ONLINE_WINDOW_MS)return res.status(409).json({error:'La PC puente está fuera de línea. Enciéndela y deja Khal Print activo antes de imprimir.',code:'PRINT_STATION_OFFLINE'});
+  if(!String(station.printer_name||'').trim())return res.status(409).json({error:'La PC puente está conectada, pero Windows no reporta la impresora/driver configurado. Instala el driver o selecciona otra Zebra.',code:'PRINT_DRIVER_MISSING'});
   const id=makeId('PRN');
   await pool.query(`INSERT INTO print_jobs(id,company_id,site_id,station_id,created_by,label_type,zpl,copies)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[id,req.companyId,siteId,station.id,req.user?.id||null,labelType,zpl,copies]);
@@ -83,8 +85,8 @@ export async function requirePrintAgent(req,res,next){try{const station=await ag
 export const printAgentRouter=Router();
 printAgentRouter.use(requirePrintAgent);
 printAgentRouter.post('/heartbeat',async(req,res,next)=>{try{
-  const printerName=clean(req.body?.printerName,180);
-  await pool.query("UPDATE print_stations SET printer_name=COALESCE(NULLIF($2,''),printer_name),last_seen_at=now(),updated_at=now() WHERE id=$1",[req.printStation.id,printerName]);
+  const printerName=clean(req.body?.printerName,180),ready=req.body?.ready===true;
+  await pool.query("UPDATE print_stations SET printer_name=$2,last_seen_at=now(),updated_at=now() WHERE id=$1",[req.printStation.id,ready?printerName:'']);
   res.json({ok:true,stationId:req.printStation.id});
 }catch(e){next(e);}});
 printAgentRouter.get('/jobs/next',async(req,res,next)=>{const client=await pool.connect();try{
