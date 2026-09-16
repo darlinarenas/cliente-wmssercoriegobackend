@@ -21,8 +21,10 @@ function validateZpl(zpl){
 }
 function stationView(row){
   const last=row.last_seen_at?new Date(row.last_seen_at).getTime():0;
-  const printerName=String(row.printer_name||'').trim();
-  return {id:row.id,siteId:row.site_id,name:row.name,printerName,printerReady:!!printerName,active:row.active!==false,lastSeenAt:row.last_seen_at||null,online:!!last&&Date.now()-last<ONLINE_WINDOW_MS};
+  const online=!!last&&Date.now()-last<ONLINE_WINDOW_MS;
+  const detectedPrinter=String(row.printer_name||'').trim();
+  const printerName=online?detectedPrinter:'';
+  return {id:row.id,siteId:row.site_id,name:row.name,printerName,printerReady:online&&!!detectedPrinter,active:row.active!==false,lastSeenAt:row.last_seen_at||null,online};
 }
 
 export const printRouter=Router();
@@ -61,7 +63,7 @@ printRouter.post('/jobs',async(req,res,next)=>{try{
   if(!station)return res.status(409).json({error:'No hay una PC puente configurada para este centro.',code:'PRINT_STATION_MISSING'});
   const lastSeen=station.last_seen_at?new Date(station.last_seen_at).getTime():0;
   if(!lastSeen||Date.now()-lastSeen>=ONLINE_WINDOW_MS)return res.status(409).json({error:'La PC puente está fuera de línea. Enciéndela y deja Khal Print activo antes de imprimir.',code:'PRINT_STATION_OFFLINE'});
-  if(!String(station.printer_name||'').trim())return res.status(409).json({error:'La PC puente está conectada, pero Windows no reporta la impresora/driver configurado. Instala el driver o selecciona otra Zebra.',code:'PRINT_DRIVER_MISSING'});
+  if(!String(station.printer_name||'').trim())return res.status(409).json({error:'Khal Print está activo, pero Windows no detecta una impresora Zebra/driver instalado en esta estación.',code:'PRINT_DRIVER_MISSING'});
   const id=makeId('PRN');
   await pool.query(`INSERT INTO print_jobs(id,company_id,site_id,station_id,created_by,label_type,zpl,copies)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[id,req.companyId,siteId,station.id,req.user?.id||null,labelType,zpl,copies]);
