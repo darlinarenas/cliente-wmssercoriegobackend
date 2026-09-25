@@ -14,6 +14,36 @@ async function upsert(t,item,companyId){
  return pool.query(`INSERT INTO ${t}(id,data,company_id) VALUES($1,$2::jsonb,$3) ON CONFLICT(company_id,id) DO UPDATE SET data=EXCLUDED.data RETURNING data`,[scoped.id,JSON.stringify(scoped),companyId]);
 }
 export const entityRouter=Router();
+entityRouter.post('/orders/:id/picked-qty',async(req,res,next)=>{
+ try{
+  if(!['ADMIN_GLOBAL','ADMINISTRADOR','ENCARGADO'].includes(req.user?.role))return res.status(403).json({error:'Solo jefe de bodega o administrador puede corregir cantidades preparadas.'});
+  const companyId=req.companyId,productCode=String(req.body?.productCode||'').trim(),pickedQty=Number(req.body?.pickedQty);
+  if(!productCode||!Number.isInteger(pickedQty)||pickedQty<0)return res.status(400).json({error:'La corrección de cantidad no es válida.'});
+  const client=await pool.connect();
+  try{
+   await client.query('BEGIN');
+   const current=(await client.query('SELECT data FROM orders WHERE company_id=$1 AND id=$2 FOR UPDATE',[companyId,req.params.id])).rows[0]?.data;
+   if(!current){await client.query('ROLLBACK');return res.status(404).json({error:'La orden ya no existe.'});}
+   if(!['ASIGNADA','EN_PICKING','PENDIENTE_EMISION','PREPARADA'].includes(current.status)){await client.query('ROLLBACK');return res.status(409).json({error:`La orden está en estado ${current.status} y ya no admite esta corrección.`});}
+   const item=(current.items||[]).find(i=>String(i.productCode)===productCode);
+   if(!item){await client.query('ROLLBACK');return res.status(404).json({error:'El producto no pertenece a esta orden.'});}
+   const requested=Number(item.qty||0),before=Number(item.pickedQty||0);
+   if(pickedQty>requested){await client.query('ROLLBACK');return res.status(400).json({error:`La cantidad no puede superar ${requested}.`});}
+   item.pickedQty=pickedQty;
+   item.shortageQty=Math.max(0,requested-pickedQty);
+   if(pickedQty>0){item.operatorNoStock=false;item.operatorNoStockAt=null;item.operatorNoStockBy=null;}
+   const now=new Date().toISOString();
+   current.events=current.events||[];
+   current.events.push({at:now,userId:req.user.id,message:`Corrección jefe/admin ${productCode}: preparado ${before} → ${pickedQty} un.`});
+   current.updatedAt=now;
+   const safeOrder=tenantItem(current,companyId);
+   await client.query('UPDATE orders SET data=$3::jsonb WHERE company_id=$1 AND id=$2',[companyId,current.id,JSON.stringify(safeOrder)]);
+   await client.query('UPDATE wms_company_meta SET revision=revision+1,updated_at=now() WHERE company_id=$1',[companyId]);
+   await client.query('COMMIT');
+   res.json(safeOrder);
+  }catch(e){await client.query('ROLLBACK').catch(()=>{});throw e;}finally{client.release();}
+ }catch(e){next(e);}
+});
 entityRouter.post('/orders/:id/emit',async(req,res,next)=>{const client=await pool.connect();try{const companyId=req.companyId,{order,inventory=[],deleteInventoryIds=[],transfer=null,shipment=null}=req.body||{},safeOrder=tenantItem(order,companyId);if(!safeOrder?.id||safeOrder.id!==req.params.id)return res.status(400).json({error:'La orden emitida no es válida.'});if(safeOrder.status!=='EMITIDA')return res.status(400).json({error:'La orden debe quedar en estado EMITIDA.'});await client.query('BEGIN');const current=(await client.query('SELECT data FROM orders WHERE company_id=$1 AND id=$2 FOR UPDATE',[companyId,safeOrder.id])).rows[0]?.data;if(!current){await client.query('ROLLBACK');return res.status(404).json({error:'La orden ya no existe en esta empresa.'});}if(!['PENDIENTE_EMISION','PREPARADA'].includes(current.status)){await client.query('ROLLBACK');return res.status(409).json({error:`La orden está en estado ${current.status} y no puede emitirse nuevamente.`});}for(const raw of inventory){const row=tenantItem(raw,companyId);await client.query('INSERT INTO inventory(id,product_code,location_id,qty,pallet_id,data,company_id) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7) ON CONFLICT(company_id,id) DO UPDATE SET product_code=EXCLUDED.product_code,location_id=EXCLUDED.location_id,qty=EXCLUDED.qty,pallet_id=EXCLUDED.pallet_id,data=EXCLUDED.data',[row.id,row.productCode,row.locationId,Number(row.qty||0),row.palletId||null,JSON.stringify(row),companyId]);}for(const id of deleteInventoryIds)await client.query('DELETE FROM inventory WHERE company_id=$1 AND id=$2',[companyId,id]);for(const [table,raw] of [['transfers',transfer],['shipments',shipment]])if(raw?.id){const row=tenantItem(raw,companyId);await client.query(`INSERT INTO ${table}(id,data,company_id) VALUES($1,$2::jsonb,$3) ON CONFLICT(company_id,id) DO UPDATE SET data=EXCLUDED.data`,[row.id,JSON.stringify(row),companyId]);}await client.query('UPDATE orders SET data=$3::jsonb WHERE company_id=$1 AND id=$2',[companyId,safeOrder.id,JSON.stringify(safeOrder)]);await client.query('UPDATE wms_company_meta SET revision=revision+1,updated_at=now() WHERE company_id=$1',[companyId]);await client.query('COMMIT');res.json({order:safeOrder,inventory,deleteInventoryIds,transfer,shipment});}catch(e){await client.query('ROLLBACK').catch(()=>{});next(e);}finally{client.release();}});
 entityRouter.get('/:entity',async(req,res,next)=>{try{const t=tableFor(req);if(t==='companies')return res.status(400).json({error:'Usa el estado autorizado para consultar empresas.'});res.json((await pool.query(selectSql(t),[req.companyId])).rows.map(r=>r.data));}catch(e){next(e);}});
 entityRouter.get('/:entity/:id',async(req,res,next)=>{try{const t=tableFor(req);if(t==='companies')return res.status(400).json({error:'Usa el estado autorizado para consultar empresas.'});const r=(await pool.query(`SELECT data FROM ${t} WHERE company_id=$1 AND id=$2`,[req.companyId,req.params.id])).rows[0];if(!r)return res.status(404).json({error:'Registro no encontrado en esta empresa.'});res.json(r.data);}catch(e){next(e);}});
