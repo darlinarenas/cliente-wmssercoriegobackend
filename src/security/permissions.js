@@ -1,10 +1,10 @@
-export const PERMISSION_SCHEMA_VERSION='2026.09.15-initial-stock-load-v1';
-export const PERMISSION_KEYS=['codesConsult','codesAssociate','codesQuantityAssociate','productsEdit','inventoryAdjust','physicalStockAdjust','initialStockLoad','labelsPrint','mapView','inventoryCount','inventoryManage','inventoryReview','palletsView','palletsOperate','palletsRegister','palletsEdit','palletsDelete','palletsCleanupResidual','changeSku','reconcileErp','applyErpStock','ordersCancel'];
+export const PERMISSION_SCHEMA_VERSION='2026.09.27-product-images-v1';
+export const PERMISSION_KEYS=['codesConsult','codesAssociate','codesQuantityAssociate','productsEdit','productImagesEdit','inventoryAdjust','physicalStockAdjust','initialStockLoad','labelsPrint','mapView','inventoryCount','inventoryManage','inventoryReview','palletsView','palletsOperate','palletsRegister','palletsEdit','palletsDelete','palletsCleanupResidual','changeSku','reconcileErp','applyErpStock','ordersCancel'];
 
 export function rolePermissions(role){
  const manage=['ADMIN_GLOBAL','ADMINISTRADOR','ENCARGADO'].includes(role);
  const operator=manage||['OPERADOR_BODEGA','OPERADOR_RECEPCION'].includes(role);
- return {codesConsult:operator,codesAssociate:manage,codesQuantityAssociate:manage,productsEdit:manage,inventoryAdjust:manage,physicalStockAdjust:manage,initialStockLoad:manage,labelsPrint:manage,mapView:manage,inventoryCount:manage,inventoryManage:manage,inventoryReview:manage,palletsView:operator,palletsOperate:operator,palletsRegister:manage,palletsEdit:manage,palletsDelete:manage,palletsCleanupResidual:manage,changeSku:manage,reconcileErp:manage,applyErpStock:manage,ordersCancel:manage};
+ return {codesConsult:operator,codesAssociate:manage,codesQuantityAssociate:manage,productsEdit:manage,productImagesEdit:manage,inventoryAdjust:manage,physicalStockAdjust:manage,initialStockLoad:manage,labelsPrint:manage,mapView:manage,inventoryCount:manage,inventoryManage:manage,inventoryReview:manage,palletsView:operator,palletsOperate:operator,palletsRegister:manage,palletsEdit:manage,palletsDelete:manage,palletsCleanupResidual:manage,changeSku:manage,reconcileErp:manage,applyErpStock:manage,ordersCancel:manage};
 }
 
 export function sanitizePermissions(value){
@@ -21,7 +21,7 @@ export function userPermissions(user,companyId,siteId){
  const assignment=effectiveAssignment(user,companyId,siteId),role=assignment?.role||user?.role;
  if(assignment?.customPermissions!==true)return rolePermissions(role);
  const source=assignment.permissions||{},permissions=sanitizePermissions(source),defaults=rolePermissions(role);
- ['codesQuantityAssociate','physicalStockAdjust','initialStockLoad','labelsPrint','mapView','inventoryCount','inventoryManage','inventoryReview','palletsView','palletsOperate','palletsRegister','palletsEdit','palletsDelete','palletsCleanupResidual','changeSku','reconcileErp','applyErpStock','ordersCancel'].forEach(key=>{if(typeof source[key]!=='boolean')permissions[key]=defaults[key];});
+ ['codesQuantityAssociate','productImagesEdit','physicalStockAdjust','initialStockLoad','labelsPrint','mapView','inventoryCount','inventoryManage','inventoryReview','palletsView','palletsOperate','palletsRegister','palletsEdit','palletsDelete','palletsCleanupResidual','changeSku','reconcileErp','applyErpStock','ordersCancel'].forEach(key=>{if(typeof source[key]!=='boolean')permissions[key]=defaults[key];});
  return permissions;
 }
 
