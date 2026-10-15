@@ -2,6 +2,7 @@ import pg from 'pg';
 import { env } from '../config/env.js';
 import { INITIAL_STATE } from './initial-state.js';
 import { storePassword } from '../security/passwords.js';
+import { userPermissions } from '../security/permissions.js';
 import { DEFAULT_COMPANY_ID, tenantItem, userCompanyIds } from '../security/tenant.js';
 
 const { Pool } = pg;
@@ -341,7 +342,14 @@ async function replaceTableBulk(client,table,items,companyId,currentUser){
 
 export async function replaceState(client,state,expectedRevision,currentUser,compact=false,companyId=DEFAULT_COMPANY_ID){
   await client.query('INSERT INTO wms_company_meta(company_id) VALUES($1) ON CONFLICT(company_id) DO NOTHING',[companyId]);
-  const locked=(await client.query('SELECT revision FROM wms_company_meta WHERE company_id=$1 FOR UPDATE',[companyId])).rows[0];
+  const locked=(await client.query('SELECT revision,settings FROM wms_company_meta WHERE company_id=$1 FOR UPDATE',[companyId])).rows[0];
+  const oldRules=locked?.settings?.replenishmentRules||{},newRules=state.settings?.replenishmentRules||{};
+  for(const key of new Set([...Object.keys(oldRules),...Object.keys(newRules)])){
+    if(JSON.stringify(oldRules[key]??null)===JSON.stringify(newRules[key]??null))continue;
+    const rule=newRules[key]||oldRules[key],siteId=String(rule?.siteId||'');
+    if(!siteId||!userPermissions(currentUser,companyId,siteId).replenishmentConfigure){const e=new Error('Tu permiso personalizado no autoriza configurar reposición inteligente.');e.status=403;throw e;}
+    if(newRules[key]&&(!Number.isSafeInteger(newRules[key].min)||newRules[key].min<0||!Number.isSafeInteger(newRules[key].target)||newRules[key].target<=newRules[key].min||String(newRules[key].locationId)+'::'+String(newRules[key].productCode)!==key)){const e=new Error('Configuración de reposición inválida.');e.status=400;throw e;}
+  }
   const actual=Number(locked?.revision||1);
   if(expectedRevision!=null && Number(expectedRevision)!==actual){const e=new Error('El inventario cambió en otro equipo. Recarga antes de guardar.');e.status=409;e.code='REVISION_CONFLICT';throw e;}
   for(const table of ENTITY_TABLES){
