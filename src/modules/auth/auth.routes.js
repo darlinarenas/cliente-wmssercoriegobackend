@@ -80,7 +80,7 @@ const supercodeChangeLimiter=rateLimit({windowMs:15*60*1000,limit:10,standardHea
 authRouter.post('/supercode',requireAuth,supercodeChangeLimiter,async(req,res,next)=>{try{
  if(req.user?.role!=='ADMIN_GLOBAL')return res.status(403).json({error:'Solo el administrador general puede gestionar el supercódigo.'});
  const code=String(req.body?.newSupercode||''),confirmation=String(req.body?.confirmSupercode||'');
- if(!/^\d{6,12}$/.test(code))return res.status(400).json({error:'El supercódigo debe tener entre 6 y 12 dígitos.'});
+ if(!/^\d{8,12}$/.test(code))return res.status(400).json({error:'El supercódigo debe tener entre 8 y 12 dígitos.'});
  if(code!==confirmation)return res.status(400).json({error:'La confirmación del supercódigo no coincide.'});
  const client=await pool.connect();try{
   await client.query('BEGIN');
