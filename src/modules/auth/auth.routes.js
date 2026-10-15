@@ -67,10 +67,32 @@ authRouter.post('/verify-supercode',requireAuth,supercodeLimiter,async(req,res,n
   if(!['ADMIN_GLOBAL','ADMINISTRADOR'].includes(req.user?.role)) return res.status(403).json({error:'Solo un administrador puede autorizar eliminaciones.'});
   const supercode=String(req.body?.supercode||'');
   if(!supercode) return res.status(400).json({error:'Ingresa el supercódigo administrativo.'});
-  const {rows}=await pool.query('SELECT password_hash FROM users WHERE id=$1',[req.user.id]);
-  const ok=rows[0]&&verifyPassword(supercode,rows[0].password_hash);
-  if(!ok) return res.status(401).json({error:'Supercódigo incorrecto.'});
+  const {rows}=await pool.query('SELECT code_hash FROM wms_supercode WHERE id=1');
+  if(!rows.length) return res.status(409).json({error:'Configura primero el supercódigo desde Administrador → Usuarios.'});
+  if(!verifyPassword(supercode,rows[0].code_hash)) return res.status(401).json({error:'Supercódigo incorrecto.'});
   res.json({ok:true});
+}catch(e){next(e);}});
+authRouter.get('/supercode-status',requireAuth,async(req,res,next)=>{try{
+ if(req.user?.role!=='ADMIN_GLOBAL')return res.status(403).json({error:'Solo el administrador general puede gestionar el supercódigo.'});
+ const {rows}=await pool.query('SELECT 1 FROM wms_supercode WHERE id=1');res.json({configured:rows.length>0});
+}catch(e){next(e);}});
+const supercodeChangeLimiter=rateLimit({windowMs:15*60*1000,limit:10,standardHeaders:true,legacyHeaders:false});
+authRouter.post('/supercode',requireAuth,supercodeChangeLimiter,async(req,res,next)=>{try{
+ if(req.user?.role!=='ADMIN_GLOBAL')return res.status(403).json({error:'Solo el administrador general puede gestionar el supercódigo.'});
+ const code=String(req.body?.newSupercode||''),confirmation=String(req.body?.confirmSupercode||'');
+ if(!/^\d{6,12}$/.test(code))return res.status(400).json({error:'El supercódigo debe tener entre 6 y 12 dígitos.'});
+ if(code!==confirmation)return res.status(400).json({error:'La confirmación del supercódigo no coincide.'});
+ const client=await pool.connect();try{
+  await client.query('BEGIN');
+  await client.query('SELECT pg_advisory_xact_lock(84721509)');
+  const existing=(await client.query('SELECT code_hash FROM wms_supercode WHERE id=1')).rows[0];
+  if(existing){if(!verifyPassword(String(req.body?.currentSupercode||''),existing.code_hash))return res.status(401).json({error:'El supercódigo actual no coincide.'});}
+  else {const user=(await client.query('SELECT password_hash FROM users WHERE id=$1',[req.user.id])).rows[0];if(!user||!verifyPassword(String(req.body?.adminPassword||''),user.password_hash))return res.status(401).json({error:'La contraseña administrativa no coincide.'});}
+  const user=(await client.query('SELECT password_hash FROM users WHERE id=$1',[req.user.id])).rows[0];
+  if(user&&verifyPassword(code,user.password_hash))return res.status(400).json({error:'El supercódigo no puede ser igual a tu contraseña de acceso.'});
+  await client.query('INSERT INTO wms_supercode(id,code_hash,updated_by,updated_at) VALUES(1,$1,$2,now()) ON CONFLICT(id) DO UPDATE SET code_hash=EXCLUDED.code_hash,updated_by=EXCLUDED.updated_by,updated_at=now()',[storePassword(code),req.user.id]);
+  await client.query('COMMIT');res.json({ok:true});
+ }finally{await client.query('ROLLBACK').catch(()=>{});client.release();}
 }catch(e){next(e);}});
 authRouter.post('/change-password',requireAuth,async(req,res,next)=>{try{
  const current=String(req.body?.currentPassword||''),nextPassword=String(req.body?.newPassword||'');
