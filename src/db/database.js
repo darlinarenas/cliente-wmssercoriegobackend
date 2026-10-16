@@ -360,7 +360,23 @@ export async function replaceState(client,state,expectedRevision,currentUser,com
     for(const t of incoming){
       if(allIds.has(String(t.id)))fail('Hay tareas de reposición duplicadas.');
       allIds.add(String(t.id));
-      if(prior.has(String(t.id))){if(JSON.stringify(prior.get(String(t.id)))!==JSON.stringify(t))fail('Las tareas de reposición asignadas no pueden modificarse desde esta pantalla.',403);continue;}
+      if(prior.has(String(t.id))){
+        const original=prior.get(String(t.id));
+        if(JSON.stringify(original)!==JSON.stringify(t)){
+          // Excepción acotada: solo el asignador autorizado puede cancelar una tarea activa.
+          const permissions=userPermissions(currentUser,companyId,String(original.siteId));
+          if(!permissions.replenishmentConfigure||String(original.assignedBy)!==String(currentUser?.id))fail('Solo quien asignó la reposición puede cancelarla.',403);
+          if(!['ASIGNADA','EN_PROCESO'].includes(original.status)||t.status!=='CANCELADA')fail('La tarea no admite esta transición.',403);
+          if(t.cancelledBy!==currentUser.id||!Number.isFinite(Date.parse(t.cancelledAt||'')))fail('Cancelación sin responsable o fecha válida.');
+          const oldEvents=Array.isArray(original.events)?original.events:[];
+          if(!Array.isArray(t.events)||t.events.length!==oldEvents.length+1||JSON.stringify(t.events.slice(0,-1))!==JSON.stringify(oldEvents))fail('El historial de la tarea no puede alterarse.');
+          const event=t.events.at(-1);
+          if(event?.userId!==currentUser.id||event?.at!==t.cancelledAt||!/^Tarea cancelada: \S/.test(event?.message||''))fail('Es obligatorio registrar el motivo de cancelación.');
+          const expected={...original,status:'CANCELADA',cancelledAt:t.cancelledAt,cancelledBy:currentUser.id,events:t.events};
+          if(JSON.stringify(expected)!==JSON.stringify(t))fail('La cancelación no puede modificar otros datos de la reposición.',403);
+        }
+        continue;
+      }
       const site=(await client.query('SELECT data FROM sites WHERE id=$1 AND company_id=$2',[String(t.siteId),companyId])).rows[0]?.data;
       if(!site||!userPermissions(currentUser,companyId,String(t.siteId)).replenishmentConfigure)fail('No tienes permiso para asignar reposiciones en este centro.',403);
       const user=(await client.query('SELECT id,active,access_status,role,site_ids,company_ids,access_assignments FROM users WHERE id=$1',[String(t.assignedTo)])).rows[0];
@@ -373,7 +389,7 @@ export async function replaceState(client,state,expectedRevision,currentUser,com
       const key=`${t.locationId}::${t.productCode}`;
       const rule=newRules[key];
       if(!rule||String(rule.siteId)!==String(t.siteId))fail('La configuración de reposición ya no existe.');
-      if(incoming.some(other=>other!==t&&other.siteId===t.siteId&&other.locationId===t.locationId&&other.productCode===t.productCode&&other.status!=='CERRADA')||previous.some(other=>other.type==='REPOSICION_INTELIGENTE'&&other.siteId===t.siteId&&other.locationId===t.locationId&&other.productCode===t.productCode&&other.status!=='CERRADA'))fail('Esta reposición ya tiene una tarea asignada.',409);
+      if(incoming.some(other=>other!==t&&other.siteId===t.siteId&&other.locationId===t.locationId&&other.productCode===t.productCode&&!['CERRADA','CANCELADA','ANULADA'].includes(other.status))||previous.some(other=>other.type==='REPOSICION_INTELIGENTE'&&other.siteId===t.siteId&&other.locationId===t.locationId&&other.productCode===t.productCode&&!['CERRADA','CANCELADA','ANULADA'].includes(other.status)))fail('Esta reposición ya tiene una tarea asignada.',409);
     }
     for(const [id] of prior)if(!allIds.has(id))fail('No se pueden eliminar tareas de reposición desde esta operación.',403);
   }
