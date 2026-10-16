@@ -350,6 +350,33 @@ export async function replaceState(client,state,expectedRevision,currentUser,com
     if(!siteId||!userPermissions(currentUser,companyId,siteId).replenishmentConfigure){const e=new Error('Tu permiso personalizado no autoriza configurar reposición inteligente.');e.status=403;throw e;}
     if(newRules[key]&&(!Number.isSafeInteger(newRules[key].min)||newRules[key].min<0||!Number.isSafeInteger(newRules[key].target)||newRules[key].target<=newRules[key].min||String(newRules[key].locationId)+'::'+String(newRules[key].productCode)!==key)){const e=new Error('Configuración de reposición inválida.');e.status=400;throw e;}
   }
+  // Reposición: validar en servidor incluso si el cliente omite X-WMS-Operation.
+  if(Array.isArray(state.tasks)){
+    const previous=(await client.query("SELECT data FROM tasks WHERE company_id=$1",[companyId])).rows.map(r=>r.data);
+    const prior=new Map(previous.filter(t=>t.type==='REPOSICION_INTELIGENTE').map(t=>[String(t.id),t]));
+    const incoming=state.tasks.filter(t=>t.type==='REPOSICION_INTELIGENTE');
+    const fail=(message,status=400)=>{const e=new Error(message);e.status=status;throw e;};
+    const allIds=new Set();
+    for(const t of incoming){
+      if(allIds.has(String(t.id)))fail('Hay tareas de reposición duplicadas.');
+      allIds.add(String(t.id));
+      if(prior.has(String(t.id))){if(JSON.stringify(prior.get(String(t.id)))!==JSON.stringify(t))fail('Las tareas de reposición asignadas no pueden modificarse desde esta pantalla.',403);continue;}
+      const site=(await client.query('SELECT data FROM sites WHERE id=$1 AND company_id=$2',[String(t.siteId),companyId])).rows[0]?.data;
+      if(!site||!userPermissions(currentUser,companyId,String(t.siteId)).replenishmentConfigure)fail('No tienes permiso para asignar reposiciones en este centro.',403);
+      const user=(await client.query('SELECT id,active,access_status,role,site_ids,company_ids,access_assignments FROM users WHERE id=$1',[String(t.assignedTo)])).rows[0];
+      const assignment=(user?.access_assignments||[]).find(a=>a.siteId===t.siteId&&a.companyId===companyId);
+      const role=assignment?.role||user?.role;
+      if(!user||user.active===false||user.access_status==='PAUSED'||!(user.company_ids||[]).includes(companyId)||(!((user.site_ids||[]).includes(t.siteId))&&!assignment)||!['OPERADOR_BODEGA','OPERADOR_RECEPCION'].includes(role))fail('El operario no está habilitado en este centro.',400);
+      if(t.status!=='ASIGNADA'||t.assignedBy!==currentUser?.id||!Number.isSafeInteger(t.qtyPlanned)||t.qtyPlanned<1||!String(t.productCode||'').trim()||!String(t.locationId||'').trim()||!Array.isArray(t.origins)||t.origins.length>30||t.origins.some(o=>!String(o.locationId||'').trim()||!Number.isSafeInteger(o.qty)||o.qty<1)||t.origins.reduce((n,o)=>n+o.qty,0)>t.qtyPlanned)fail('Datos de tarea de reposición inválidos.');
+      const location=(await client.query('SELECT data FROM locations WHERE id=$1 AND company_id=$2',[String(t.locationId),companyId])).rows[0]?.data;
+      if(!location||location.siteId!==t.siteId)fail('La posición destino no pertenece al centro.');
+      const key=`${t.locationId}::${t.productCode}`;
+      const rule=newRules[key];
+      if(!rule||String(rule.siteId)!==String(t.siteId))fail('La configuración de reposición ya no existe.');
+      if(incoming.some(other=>other!==t&&other.siteId===t.siteId&&other.locationId===t.locationId&&other.productCode===t.productCode&&other.status!=='CERRADA')||previous.some(other=>other.type==='REPOSICION_INTELIGENTE'&&other.siteId===t.siteId&&other.locationId===t.locationId&&other.productCode===t.productCode&&other.status!=='CERRADA'))fail('Esta reposición ya tiene una tarea asignada.',409);
+    }
+    for(const [id] of prior)if(!allIds.has(id))fail('No se pueden eliminar tareas de reposición desde esta operación.',403);
+  }
   const actual=Number(locked?.revision||1);
   if(expectedRevision!=null && Number(expectedRevision)!==actual){const e=new Error('El inventario cambió en otro equipo. Recarga antes de guardar.');e.status=409;e.code='REVISION_CONFLICT';throw e;}
   for(const table of ENTITY_TABLES){
