@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import { env } from './config/env.js';
 import { apiRouter } from './routes/index.js';
 import { notFound, errorHandler } from './middleware/error-handler.js';
+import { trafficMetrics } from './middleware/traffic-metrics.js';
 
 export const app=express();
 app.use(helmet());
@@ -54,6 +55,6 @@ app.use(cors({
 }));
 
 app.use(express.json({limit:'8mb'}));
-app.use('/api',apiRouter);
+app.use('/api',trafficMetrics,apiRouter);
 app.use(notFound);
 app.use(errorHandler);
