@@ -222,6 +222,12 @@ export async function withTransaction(fn){
   try{await client.query('BEGIN');const result=await fn(client);await client.query('COMMIT');return result;}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
 }
 
+// Consulta liviana para refrescos silenciosos; nunca reconstruye colecciones.
+export async function readStateRevision(companyId=DEFAULT_COMPANY_ID){
+  const result=await pool.query('SELECT revision FROM wms_company_meta WHERE company_id=$1',[companyId]);
+  return Number(result.rows[0]?.revision||1);
+}
+
 export async function readState(client=pool,currentUser=null,companyId=DEFAULT_COMPANY_ID){
   await client.query("INSERT INTO wms_company_meta(company_id) VALUES($1) ON CONFLICT(company_id) DO NOTHING",[companyId]);
   const allowedCompanies=currentUser?.role==='ADMIN_GLOBAL'?null:userCompanyIds(currentUser);
