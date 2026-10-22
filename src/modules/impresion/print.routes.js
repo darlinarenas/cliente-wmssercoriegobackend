@@ -27,11 +27,39 @@ function stationView(row){
   return {id:row.id,siteId:row.site_id,name:row.name,printerName,printerReady:online&&!!detectedPrinter,active:row.active!==false,lastSeenAt:row.last_seen_at||null,online};
 }
 
+// Activación temporal en memoria: no altera la base de datos ni el flujo de impresión.
+const printShareCodes=new Map(); // Códigos temporales; no alteran tokens del driver.
+const printWakeUntil=new Map();
+const PRINT_WAKE_MS=120000;
+const wakePrintStation=id=>printWakeUntil.set(id,Date.now()+PRINT_WAKE_MS);
+const printStationAwake=id=>(printWakeUntil.get(id)||0)>Date.now();
 export const printRouter=Router();
+// Compartir exige autorización explícita de un administrador en ambas empresas.
+printRouter.post('/stations/:id/share-code',requireRole('ADMIN_GLOBAL','ADMINISTRADOR','ENCARGADO'),async(req,res,next)=>{try{
+  const station=(await pool.query('SELECT id FROM print_stations WHERE id=$1 AND company_id=$2 AND active=true',[req.params.id,req.companyId])).rows[0];
+  if(!station)return res.status(404).json({error:'Estación no encontrada en esta empresa.'});
+  const code=crypto.randomBytes(12).toString('hex').toUpperCase();
+  printShareCodes.set(hashToken(code),{stationId:station.id,expires:Date.now()+10*60*1000});
+  res.json({code,expiresInSeconds:600});
+}catch(e){next(e);}});
+printRouter.post('/stations/link',requireRole('ADMIN_GLOBAL','ADMINISTRADOR','ENCARGADO'),async(req,res,next)=>{try{
+  const siteId=clean(req.body?.siteId,80),code=clean(req.body?.code,80).toUpperCase();
+  if(!siteId||!code)return res.status(400).json({error:'Indica el centro y el código de vinculación.'});
+  await ensureSite(req.companyId,siteId);
+  const key=hashToken(code),grant=printShareCodes.get(key);
+  if(!grant||grant.expires<Date.now())return res.status(400).json({error:'Código inválido o vencido. Genera uno nuevo desde la empresa de origen.'});
+  const station=(await pool.query('SELECT id,company_id,active FROM print_stations WHERE id=$1',[grant.stationId])).rows[0];
+  if(!station?.active||station.company_id===req.companyId)return res.status(400).json({error:'La estación debe estar activa y pertenecer a otra empresa.'});
+  await pool.query(`INSERT INTO print_station_grants(station_id,company_id,site_id,created_by) VALUES($1,$2,$3,$4)
+    ON CONFLICT (station_id,company_id,site_id) DO NOTHING`,[station.id,req.companyId,siteId,req.user?.id||null]);
+  printShareCodes.delete(key);
+  res.json({ok:true,stationId:station.id});
+}catch(e){next(e);}});
+
 printRouter.get('/stations',async(req,res,next)=>{try{
   const siteId=clean(req.query.siteId,80);if(siteId)await ensureSite(req.companyId,siteId);
   const params=[req.companyId];let where='company_id=$1';if(siteId){params.push(siteId);where+=' AND site_id=$2';}
-  const rows=(await pool.query(`SELECT * FROM print_stations WHERE ${where} ORDER BY active DESC,last_seen_at DESC NULLS LAST,name`,params)).rows;
+  const rows=(await pool.query(`SELECT s.* FROM print_stations s WHERE (${where.replaceAll('company_id','s.company_id').replaceAll('site_id','s.site_id')}) OR EXISTS (SELECT 1 FROM print_station_grants g WHERE g.station_id=s.id AND g.company_id=$1 AND ($2::text IS NULL OR g.site_id=$2)) ORDER BY s.active DESC,s.last_seen_at DESC NULLS LAST,s.name`,siteId?[req.companyId,siteId]:[req.companyId,null])).rows;
   res.json({stations:rows.map(stationView)});
 }catch(e){next(e);}});
 
@@ -53,17 +81,27 @@ printRouter.patch('/stations/:id',requireRole('ADMIN_GLOBAL','ADMINISTRADOR','EN
   res.json({station:stationView(row)});
 }catch(e){next(e);}});
 
+printRouter.post('/stations/:id/wake',async(req,res,next)=>{try{
+ const siteId=clean(req.body?.siteId,80);
+ if(!siteId)return res.status(400).json({error:'Centro de impresión no indicado.'});
+ await ensureSite(req.companyId,siteId);
+ const station=(await pool.query(`SELECT id FROM print_stations s WHERE s.id=$1 AND s.active=true AND ((s.company_id=$2 AND s.site_id=$3) OR EXISTS (SELECT 1 FROM print_station_grants g WHERE g.station_id=s.id AND g.company_id=$2 AND g.site_id=$3))`,[req.params.id,req.companyId,siteId])).rows[0];
+ if(!station)return res.status(404).json({error:'No se encontró la PC puente en este centro.'});
+ wakePrintStation(station.id);
+ res.json({ok:true,activeSeconds:120});
+}catch(e){next(e);}});
 printRouter.post('/jobs',async(req,res,next)=>{try{
   const siteId=clean(req.body?.siteId,80),requestedStation=clean(req.body?.stationId,100),labelType=clean(req.body?.labelType,40),copies=Math.max(1,Math.min(500,Number(req.body?.copies)||1)),zpl=validateZpl(req.body?.zpl);
   if(!siteId)return res.status(400).json({error:'No se pudo determinar el centro de impresión.'});
   await ensureSite(req.companyId,siteId);
   let station;
-  if(requestedStation)station=(await pool.query('SELECT * FROM print_stations WHERE id=$1 AND company_id=$2 AND site_id=$3 AND active=true',[requestedStation,req.companyId,siteId])).rows[0];
-  else station=(await pool.query('SELECT * FROM print_stations WHERE company_id=$1 AND site_id=$2 AND active=true ORDER BY last_seen_at DESC NULLS LAST,created_at ASC LIMIT 1',[req.companyId,siteId])).rows[0];
+  if(requestedStation)station=(await pool.query(`SELECT s.* FROM print_stations s WHERE s.id=$1 AND s.active=true AND ((s.company_id=$2 AND s.site_id=$3) OR EXISTS (SELECT 1 FROM print_station_grants g WHERE g.station_id=s.id AND g.company_id=$2 AND g.site_id=$3))`,[requestedStation,req.companyId,siteId])).rows[0];
+  else station=(await pool.query(`SELECT s.* FROM print_stations s WHERE s.active=true AND ((s.company_id=$1 AND s.site_id=$2) OR EXISTS (SELECT 1 FROM print_station_grants g WHERE g.station_id=s.id AND g.company_id=$1 AND g.site_id=$2)) ORDER BY s.last_seen_at DESC NULLS LAST,s.created_at ASC LIMIT 1`,[req.companyId,siteId])).rows[0];
   if(!station)return res.status(409).json({error:'No hay una PC puente configurada para este centro.',code:'PRINT_STATION_MISSING'});
   const lastSeen=station.last_seen_at?new Date(station.last_seen_at).getTime():0;
   if(!lastSeen||Date.now()-lastSeen>=ONLINE_WINDOW_MS)return res.status(409).json({error:'La PC puente está fuera de línea. Enciéndela y deja Khal Print activo antes de imprimir.',code:'PRINT_STATION_OFFLINE'});
   if(!String(station.printer_name||'').trim())return res.status(409).json({error:'Khal Print está activo, pero Windows no detecta una impresora Zebra/driver instalado en esta estación.',code:'PRINT_DRIVER_MISSING'});
+  wakePrintStation(station.id);
   const id=makeId('PRN');
   await pool.query(`INSERT INTO print_jobs(id,company_id,site_id,station_id,created_by,label_type,zpl,copies)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[id,req.companyId,siteId,station.id,req.user?.id||null,labelType,zpl,copies]);
@@ -86,6 +124,13 @@ export async function requirePrintAgent(req,res,next){try{const station=await ag
 
 export const printAgentRouter=Router();
 printAgentRouter.use(requirePrintAgent);
+printAgentRouter.get('/activation',async(req,res,next)=>{try{
+ const stationId=req.printStation.id;
+ // Mantener activo hasta finalizar los trabajos ya aceptados o pendientes.
+ const pending=await pool.query("SELECT 1 FROM print_jobs WHERE station_id=$1 AND (status='pending' OR status='claimed') LIMIT 1",[stationId]);
+ if(pending.rowCount)wakePrintStation(stationId);
+ res.json({ok:true,awake:printStationAwake(stationId)});
+}catch(e){next(e);}});
 printAgentRouter.post('/heartbeat',async(req,res,next)=>{try{
   const printerName=clean(req.body?.printerName,180),ready=req.body?.ready===true;
   await pool.query("UPDATE print_stations SET printer_name=$2,last_seen_at=now(),updated_at=now() WHERE id=$1",[req.printStation.id,ready?printerName:'']);
@@ -98,6 +143,7 @@ printAgentRouter.get('/jobs/next',async(req,res,next)=>{const client=await pool.
     WHERE station_id=$1 AND (status='pending' OR (status='claimed' AND claimed_at<now()-interval '90 seconds'))
     ORDER BY created_at ASC FOR UPDATE SKIP LOCKED LIMIT 1`,[req.printStation.id])).rows[0];
   if(!row){await client.query('COMMIT');return res.json({ok:true,job:null});}
+  wakePrintStation(req.printStation.id);
   await client.query("UPDATE print_jobs SET status='claimed',claimed_at=now(),attempts=attempts+1,updated_at=now() WHERE id=$1",[row.id]);
   await client.query('COMMIT');res.json({ok:true,job:{id:row.id,zpl:row.zpl,copies:row.copies,labelType:row.label_type}});
 }catch(e){await client.query('ROLLBACK').catch(()=>{});next(e);}finally{client.release();}});

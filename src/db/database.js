@@ -64,6 +64,15 @@ CREATE TABLE IF NOT EXISTS print_stations (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS print_station_grants (
+  station_id TEXT NOT NULL REFERENCES print_stations(id) ON DELETE CASCADE,
+  company_id TEXT NOT NULL,
+  site_id TEXT NOT NULL,
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY(station_id,company_id,site_id)
+);
+CREATE INDEX IF NOT EXISTS idx_print_station_grants_scope ON print_station_grants(company_id,site_id);
 CREATE TABLE IF NOT EXISTS print_jobs (
   id TEXT PRIMARY KEY,
   company_id TEXT NOT NULL,
