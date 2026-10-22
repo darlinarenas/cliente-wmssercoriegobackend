@@ -34,32 +34,13 @@ const PRINT_WAKE_MS=120000;
 const wakePrintStation=id=>printWakeUntil.set(id,Date.now()+PRINT_WAKE_MS);
 const printStationAwake=id=>(printWakeUntil.get(id)||0)>Date.now();
 export const printRouter=Router();
-// Compartir exige autorización explícita de un administrador en ambas empresas.
-printRouter.post('/stations/:id/share-code',requireRole('ADMIN_GLOBAL','ADMINISTRADOR','ENCARGADO'),async(req,res,next)=>{try{
-  const station=(await pool.query('SELECT id FROM print_stations WHERE id=$1 AND company_id=$2 AND active=true',[req.params.id,req.companyId])).rows[0];
-  if(!station)return res.status(404).json({error:'Estación no encontrada en esta empresa.'});
-  const code=crypto.randomBytes(12).toString('hex').toUpperCase();
-  printShareCodes.set(hashToken(code),{stationId:station.id,expires:Date.now()+10*60*1000});
-  res.json({code,expiresInSeconds:600});
-}catch(e){next(e);}});
-printRouter.post('/stations/link',requireRole('ADMIN_GLOBAL','ADMINISTRADOR','ENCARGADO'),async(req,res,next)=>{try{
-  const siteId=clean(req.body?.siteId,80),code=clean(req.body?.code,80).toUpperCase();
-  if(!siteId||!code)return res.status(400).json({error:'Indica el centro y el código de vinculación.'});
-  await ensureSite(req.companyId,siteId);
-  const key=hashToken(code),grant=printShareCodes.get(key);
-  if(!grant||grant.expires<Date.now())return res.status(400).json({error:'Código inválido o vencido. Genera uno nuevo desde la empresa de origen.'});
-  const station=(await pool.query('SELECT id,company_id,active FROM print_stations WHERE id=$1',[grant.stationId])).rows[0];
-  if(!station?.active||station.company_id===req.companyId)return res.status(400).json({error:'La estación debe estar activa y pertenecer a otra empresa.'});
-  await pool.query(`INSERT INTO print_station_grants(station_id,company_id,site_id,created_by) VALUES($1,$2,$3,$4)
-    ON CONFLICT (station_id,company_id,site_id) DO NOTHING`,[station.id,req.companyId,siteId,req.user?.id||null]);
-  printShareCodes.delete(key);
-  res.json({ok:true,stationId:station.id});
-}catch(e){next(e);}});
-
 printRouter.get('/stations',async(req,res,next)=>{try{
   const siteId=clean(req.query.siteId,80);if(siteId)await ensureSite(req.companyId,siteId);
-  const params=[req.companyId];let where='company_id=$1';if(siteId){params.push(siteId);where+=' AND site_id=$2';}
-  const rows=(await pool.query(`SELECT s.* FROM print_stations s WHERE (${where.replaceAll('company_id','s.company_id').replaceAll('site_id','s.site_id')}) OR EXISTS (SELECT 1 FROM print_station_grants g WHERE g.station_id=s.id AND g.company_id=$1 AND ($2::text IS NULL OR g.site_id=$2)) ORDER BY s.active DESC,s.last_seen_at DESC NULLS LAST,s.name`,siteId?[req.companyId,siteId]:[req.companyId,null])).rows;
+  // El usuario autenticado solo puede solicitar un centro de su empresa.
+  // La estación física es compartida; los trabajos conservan company_id y site_id.
+  const rows=(await pool.query(`SELECT s.* FROM print_stations s
+    WHERE s.active=true AND (s.company_id=$1 OR s.last_seen_at>now()-interval '20 seconds')
+    ORDER BY s.last_seen_at DESC NULLS LAST,s.name`,[req.companyId])).rows;
   res.json({stations:rows.map(stationView)});
 }catch(e){next(e);}});
 
@@ -85,7 +66,7 @@ printRouter.post('/stations/:id/wake',async(req,res,next)=>{try{
  const siteId=clean(req.body?.siteId,80);
  if(!siteId)return res.status(400).json({error:'Centro de impresión no indicado.'});
  await ensureSite(req.companyId,siteId);
- const station=(await pool.query(`SELECT id FROM print_stations s WHERE s.id=$1 AND s.active=true AND ((s.company_id=$2 AND s.site_id=$3) OR EXISTS (SELECT 1 FROM print_station_grants g WHERE g.station_id=s.id AND g.company_id=$2 AND g.site_id=$3))`,[req.params.id,req.companyId,siteId])).rows[0];
+ const station=(await pool.query(`SELECT id FROM print_stations s WHERE s.id=$1 AND s.active=true AND (s.company_id=$2 OR s.last_seen_at>now()-interval '20 seconds')`,[req.params.id,req.companyId,siteId])).rows[0];
  if(!station)return res.status(404).json({error:'No se encontró la PC puente en este centro.'});
  wakePrintStation(station.id);
  res.json({ok:true,activeSeconds:120});
@@ -95,8 +76,8 @@ printRouter.post('/jobs',async(req,res,next)=>{try{
   if(!siteId)return res.status(400).json({error:'No se pudo determinar el centro de impresión.'});
   await ensureSite(req.companyId,siteId);
   let station;
-  if(requestedStation)station=(await pool.query(`SELECT s.* FROM print_stations s WHERE s.id=$1 AND s.active=true AND ((s.company_id=$2 AND s.site_id=$3) OR EXISTS (SELECT 1 FROM print_station_grants g WHERE g.station_id=s.id AND g.company_id=$2 AND g.site_id=$3))`,[requestedStation,req.companyId,siteId])).rows[0];
-  else station=(await pool.query(`SELECT s.* FROM print_stations s WHERE s.active=true AND ((s.company_id=$1 AND s.site_id=$2) OR EXISTS (SELECT 1 FROM print_station_grants g WHERE g.station_id=s.id AND g.company_id=$1 AND g.site_id=$2)) ORDER BY s.last_seen_at DESC NULLS LAST,s.created_at ASC LIMIT 1`,[req.companyId,siteId])).rows[0];
+  if(requestedStation)station=(await pool.query(`SELECT s.* FROM print_stations s WHERE s.id=$1 AND s.active=true AND (s.company_id=$2 OR s.last_seen_at>now()-interval '20 seconds')`,[requestedStation,req.companyId,siteId])).rows[0];
+  else station=(await pool.query(`SELECT s.* FROM print_stations s WHERE s.active=true AND (s.company_id=$1 OR s.last_seen_at>now()-interval '20 seconds') ORDER BY s.last_seen_at DESC NULLS LAST,s.created_at ASC LIMIT 1`,[req.companyId,siteId])).rows[0];
   if(!station)return res.status(409).json({error:'No hay una PC puente configurada para este centro.',code:'PRINT_STATION_MISSING'});
   const lastSeen=station.last_seen_at?new Date(station.last_seen_at).getTime():0;
   if(!lastSeen||Date.now()-lastSeen>=ONLINE_WINDOW_MS)return res.status(409).json({error:'La PC puente está fuera de línea. Enciéndela y deja Khal Print activo antes de imprimir.',code:'PRINT_STATION_OFFLINE'});
