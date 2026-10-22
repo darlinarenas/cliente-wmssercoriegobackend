@@ -66,7 +66,7 @@ printRouter.post('/stations/:id/wake',async(req,res,next)=>{try{
  const siteId=clean(req.body?.siteId,80);
  if(!siteId)return res.status(400).json({error:'Centro de impresión no indicado.'});
  await ensureSite(req.companyId,siteId);
- const station=(await pool.query(`SELECT id FROM print_stations s WHERE s.id=$1 AND s.active=true AND (s.company_id=$2 OR s.last_seen_at>now()-interval '20 seconds')`,[req.params.id,req.companyId,siteId])).rows[0];
+ const station=(await pool.query(`SELECT id FROM print_stations s WHERE s.id=$1 AND s.active=true AND (s.company_id=$2 OR s.last_seen_at>now()-interval '20 seconds')`,[req.params.id,req.companyId])).rows[0];
  if(!station)return res.status(404).json({error:'No se encontró la PC puente en este centro.'});
  wakePrintStation(station.id);
  res.json({ok:true,activeSeconds:120});
@@ -76,8 +76,8 @@ printRouter.post('/jobs',async(req,res,next)=>{try{
   if(!siteId)return res.status(400).json({error:'No se pudo determinar el centro de impresión.'});
   await ensureSite(req.companyId,siteId);
   let station;
-  if(requestedStation)station=(await pool.query(`SELECT s.* FROM print_stations s WHERE s.id=$1 AND s.active=true AND (s.company_id=$2 OR s.last_seen_at>now()-interval '20 seconds')`,[requestedStation,req.companyId,siteId])).rows[0];
-  else station=(await pool.query(`SELECT s.* FROM print_stations s WHERE s.active=true AND (s.company_id=$1 OR s.last_seen_at>now()-interval '20 seconds') ORDER BY s.last_seen_at DESC NULLS LAST,s.created_at ASC LIMIT 1`,[req.companyId,siteId])).rows[0];
+  if(requestedStation)station=(await pool.query(`SELECT s.* FROM print_stations s WHERE s.id=$1 AND s.active=true AND (s.company_id=$2 OR s.last_seen_at>now()-interval '20 seconds')`,[requestedStation,req.companyId])).rows[0];
+  else station=(await pool.query(`SELECT s.* FROM print_stations s WHERE s.active=true AND (s.company_id=$1 OR s.last_seen_at>now()-interval '20 seconds') ORDER BY s.last_seen_at DESC NULLS LAST,s.created_at ASC LIMIT 1`,[req.companyId])).rows[0];
   if(!station)return res.status(409).json({error:'No hay una PC puente configurada para este centro.',code:'PRINT_STATION_MISSING'});
   const lastSeen=station.last_seen_at?new Date(station.last_seen_at).getTime():0;
   if(!lastSeen||Date.now()-lastSeen>=ONLINE_WINDOW_MS)return res.status(409).json({error:'La PC puente está fuera de línea. Enciéndela y deja Khal Print activo antes de imprimir.',code:'PRINT_STATION_OFFLINE'});
